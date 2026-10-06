@@ -1,0 +1,2 @@
+export type Section = { animation?: 'redirect'|'ranges'|'deletion'; title: string; body: string; origin: 'Source conversation' | 'Supplementary explanation' | 'Your content' };
+export type Question = { id: string; title: string; slug: string; topic: string; difficulty: 'Beginner'|'Intermediate'|'Advanced'; type: 'System design'|'Interview'|'Follow-up'; tags: string[]; description: string; sections: Section[]; takeaways: string[]; related: string[]; animation?: 'redirect'|'ranges'|'deletion'; };

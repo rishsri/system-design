@@ -1,0 +1,613 @@
+[
+  {
+    "id": "design-url-shortener",
+    "slug": "design-url-shortener",
+    "title": "Design a URL shortener",
+    "type": "System design",
+    "difficulty": "Intermediate",
+    "topic": "URL shortener",
+    "description": "Ek short link kaise banta hai? Cache, scaling aur failures ko step by step samjho.",
+    "sections": [
+      {
+        "title": "Intuition & problem statement",
+        "body": "Socho ek cloakroom mein bag jama kiya aur chhota ticket mila. Ticket bag ko compress nahi karta; bas bag tak pahunchne ka reference hai. URL shortener bhi aisa hi hai: long URL ko database mein rakho, chhota lookup code return karo.\n\n**Example:**\n\n`https://shop.example.com/products/mobile?campaign=diwali` → `https://sho.rt/aB7x2Q`\n\nInterviewer dekhna chahta hai ki tum requirements se shuru karke uniqueness, fast redirects aur failures ke decisions explain kar sakte ho.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Clarify before designing",
+        "body": "Pehle pucho: **daily kitne new links aur redirects? Peak traffic kitna?** Users per year useful context hai, lekin requests per second capacity decide karte hain. Ek user ka ek link millions of clicks le sakta hai.\n\n- Link expiry kya hogi?\n- Custom aliases chahiye?\n- Same long URL ko same short link dena hai?\n- Accounts aur click analytics chahiye?\n- Redirect latency aur availability expectations kya hain?\n\nFunctional requirements = system kya karega: create link, redirect, optional expiry. Non-functional requirements = kitni achhi tarah karega: fast response, availability, scale aur unique codes. Exact latency target interviewer se agree karo.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Capacity estimates",
+        "body": "Assume **10 million new links per day**, aur **100 redirects per link within that day**. Ek din mein 24 × 60 × 60 = **86,400 seconds**.\n\n`Creation RPS = 10,000,000 / 86,400 ≈ 116`\n\n`Redirect RPS = (10,000,000 × 100) / 86,400 ≈ 11,574`\n\nRPS means requests per second. Yeh averages hain; peak ke liye alag headroom chahiye. Agar 100 redirects poore link lifetime mein hain, daily redirect traffic is calculation se nahi nikal sakte.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Start simple, then improve",
+        "body": "Pehla version: URL service + database. Create par validate → code generate → mapping save. Click par mapping find → browser ko redirect.\n\nPhir popular mappings ke liye Redis add karo. Redis ek fast in-memory store hai. Multiple stateless service instances ke saamne load balancer rakho; woh incoming requests distribute karta hai. Analytics ko queue + worker mein bhejo, redirect ko counting ke liye wait mat karao.\n\n```mermaid\nflowchart LR\n B[Browser] --> L[Load balancer]\n L --> S[URL service]\n S --> R[Redis cache]\n S --> D[(Mapping database)]\n S -. Click event .-> Q[Queue]\n Q --> W[Analytics worker]\n```",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Generate a unique code",
+        "body": "Random Base62 characters use kar sakte hain: a–z, A–Z, 0–9 = 62 symbols. **62⁷ ≈ 3.5 trillion combinations.** Badi space ka matlab collision impossible nahi hai.\n\nAlag SELECT karke check, phir INSERT mat rely karo: do servers ek hi waqt dono “absent” dekh sakte hain. **Direct INSERT + database UNIQUE constraint + duplicate par retry.**\n\n```text\nValidate URL → generate random code → INSERT\n  Success: return short URL\n  Duplicate: generate another code and retry\n```\n\nYeh design globally enforced uniqueness wale database par depend karta hai. ZooKeeper mandatory nahi hai. Allocated numeric ranges + Base62 ek alternative hai, detailed related lesson mein.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Redirect request & expiry",
+        "body": "Service pehle Redis mein code lookup kare. Hit par long URL lo; miss par DB query karo, valid mapping Redis mein store karo, phir redirect return karo. Missing mapping → 404.\n\n**302** useful default hai jab destination badal sakta hai. **301** permanent hai; browser cache kar sakta hai aur future requests service tak na aayein.\n\nExpiry ko cache aur DB dono paths par check karo. Cache TTL = minimum(normal cache duration, expires_at − current_time). DB record ka physically delete hona zaroori nahi; expiry timestamp invalidity decide kar sakta hai.",
+        "origin": "Source conversation",
+        "animation": "redirect"
+      },
+      {
+        "title": "API & data model",
+        "body": "Yeh concrete API aur SQL chat ko extend karte hain.\n\n- **POST /api/links** — long_url aur optional expires_at; successful creation par 201 with code and short_url.\n- **GET /:code** — valid mapping par 302 with Location header; missing par 404. Expired links ke liye 410 Gone choose kar sakte ho.\n- **DELETE /api/links/:code** — ownership check, mapping disable/delete, durable cache invalidation.\n\n```sql\nCREATE TABLE links (\n  short_code VARCHAR(32) PRIMARY KEY,\n  long_url TEXT NOT NULL,\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n  expires_at TIMESTAMPTZ\n);\n```\n\nRelational database unique constraint aur durable writes ke liye simple starting choice hai. Custom aliases chahiye toh schema ko fixed seven characters tak restrict mat karo. HTTP/HTTPS schemes validate karo. Owner/auth fields tab add karo jab accounts required hon.\n\nStorage estimate example: assumed 500 bytes per mapping × 10M = roughly 5 GB/day raw. Indexes, replication aur actual URL lengths extra storage lenge; yeh source ka specified number nahi hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Scale & handle failures",
+        "body": "Reads creates se kaafi zyada hain, isliye redirect path optimise karo. Popular mappings cache karo, service instances badhao, zarurat par short-code hash se DB shards choose karo. Sharding means data alag database partitions mein distribute karna.\n\nRedis down ho toh automatic failover configured replica help kar sakta hai. Complete cache outage mein DB fallback possible hai, lekin sudden read load DB ko overload kar sakta hai. ID ranges mapping writes eliminate nahi karte: har new URL DB mein save hoga.\n\nDelete ke baad cache invalidate karo. Direct DB deletions ke liye CDC aur late cache writers ke liye tombstone coordination chahiye; related lessons details explain karte hain.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Trade-offs & interview follow-ups",
+        "body": "Random codes simple hain, lekin collision retry aur unique index chahiye. ID ranges local counters dete hain, lekin durable allocator aur safe restart required hain. Sequential Base62 IDs predictable ho sakte hain; encoding secrecy nahi deta.\n\nNeeche interview questions mein ek-ek decision ko examples ke saath samjhenge. Pehle khud answer socho, phir explanation kholo.\n\nSupplement: queue analytics latency improve karti hai. Retry ke saath duplicate events possible hain, isliye event IDs se deduplicate karna useful hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Common mistakes",
+        "body": "- Millions of users ko automatically millions of writes/second samajhna.\n- Redis ko redirect bhejne wala component bolna: redirect **URL service** bhejti hai.\n- Check-then-insert ko uniqueness guarantee maanna.\n- Expiry ko physical DB deletion samajhna.\n- Allocated range se mapping write load hat jayega maanna.\n- CDC ko stale refill race ka complete solution samajhna.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "Short code is a lookup key, not compressed URL.",
+      "Estimate creations and redirects separately.",
+      "Start with DB uniqueness; add cache for reads.",
+      "Expiry, deletion and failures need explicit handling."
+    ],
+    "animation": "redirect",
+    "tags": [
+      "Architecture",
+      "Scaling"
+    ],
+    "related": [
+      "clarifying-requirements",
+      "traffic-estimation",
+      "random-code-uniqueness",
+      "redirect-flow",
+      "popular-links",
+      "cache-aside",
+      "cache-expiry",
+      "redis-outage",
+      "cdc-invalidation",
+      "stale-cache-race",
+      "range-recovery",
+      "sequential-predictability"
+    ]
+  },
+  {
+    "id": "clarifying-requirements",
+    "slug": "clarifying-requirements",
+    "title": "Before designing Bitly, what requirements would you clarify?",
+    "type": "Interview",
+    "difficulty": "Beginner",
+    "topic": "URL shortener",
+    "description": "Pehle kya banana hai aur kitna traffic handle karna hai, woh samjho.",
+    "sections": [
+      {
+        "title": "Pehle intuition samjho",
+        "body": "Ghar banane se pehle architect poochta hai: kitne log rahenge, kitne rooms chahiye, budget kya hai? URL shortener mein bhi pehle requirements poochni hain. Seedha Redis ya ZooKeeper bolne se design clear nahi hota.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interviewer se kya poochoge?",
+        "body": "**Features ke liye:**\n\n- Sirf short link banana aur redirect karna hai?\n- Link kab expire hoga?\n- User apna custom alias, jaise `/my-offer`, choose kar sakta hai?\n- Same long URL dobara aaye toh same short link dena hai ya naya?\n- Accounts aur click analytics chahiye?\n\n**Scale aur quality ke liye:**\n\n- Daily kitne new links aur kitne redirects honge? Peak traffic kitna hai?\n- Redirect kitna fast hona chahiye?\n- Service kitni available rehni chahiye?\n\nFunctional requirements = system **kya karega**. Non-functional requirements = woh kaam **kitni speed, reliability aur scale par karega**.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Pehle main creation aur redirect traffic, peak load, expiry, custom aliases, repeated URLs ka behavior aur analytics clarify karunga. Phir redirect latency aur availability expectations agree karunga.”\n\n**Sirf users per year kyun nahi?** Ek user ek link bana sakta hai aur usi link par millions of clicks aa sakte hain. Isliye request volume zyada useful hai.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "Features aur scale pehle clarify karo.",
+      "Users ka count aur requests ka count same nahi hota."
+    ],
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "random-code-uniqueness",
+      "cache-expiry",
+      "redis-outage"
+    ]
+  },
+  {
+    "id": "traffic-estimation",
+    "slug": "traffic-estimation",
+    "topic": "URL shortener",
+    "tags": [
+      "Interview practice"
+    ],
+    "related": [],
+    "title": "Given 10M new links/day and 100 redirects per link that day, estimate average RPS.",
+    "description": "Daily numbers ko per-second traffic mein convert karo.",
+    "type": "Interview",
+    "difficulty": "Beginner",
+    "sections": [
+      {
+        "title": "Intuition",
+        "body": "Agar shop mein din bhar 240 customers aaye aur shop 24 hours khuli ho, average 10 customers/hour hoga. RPS bhi aisa hi average hai — **requests per second**.\n\nYahan assume kar rahe hain ki har link ke 100 redirects **usi din** hote hain.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Calculation, ek step at a time",
+        "body": "Ek din mein:\n\n```text\n24 hours × 60 minutes × 60 seconds = 86,400 seconds\n```\n\n**Creation traffic:** 10 million = 10,000,000 new links/day.\n\n```text\n10,000,000 ÷ 86,400 ≈ 116 creation requests/second\n```\n\n**Redirect traffic:** Har link par 100 redirects.\n\n```text\n10,000,000 × 100 = 1,000,000,000 redirects/day\n1,000,000,000 ÷ 86,400 ≈ 11,574 redirects/second\n```\n\nRedirect traffic creation se lagbhag **100 times** hai. Isliye read/redirect path ko fast banana important hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Average creation load about 116 RPS aur redirect load about 11.6K RPS hoga. Yeh daily average hai; peak traffic alag clarify karunga.”\n\n**Common mistake:** 100 redirects agar poore link lifetime mein hote hain, toh unhe daily traffic maan kar yeh calculation nahi kar sakte. Aur average RPS ko maximum load mat samjho.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "1 day = 86,400 seconds.",
+      "Creation ≈ 116 RPS; redirects ≈ 11,574 RPS.",
+      "Daily average, peak aur lifetime traffic ko alag rakho."
+    ]
+  },
+  {
+    "id": "random-code-uniqueness",
+    "slug": "random-code-uniqueness",
+    "title": "How would you generate unique codes across servers? Random codes vs ID ranges.",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "topic": "URL shortener",
+    "description": "Do valid approaches aur unke actual trade-offs.",
+    "sections": [
+      {
+        "title": "Approach 1: random code",
+        "body": "Har server random 7-character Base62 code generate kare. Base62 = a–z, A–Z, 0–9; total 62 characters. 62⁷ ≈ **3.5 trillion possible codes**.\n\nLekin same code do servers par ban sakta hai — ise **collision** kehte hain. Isliye DB mein `short_code` UNIQUE rakho aur directly INSERT karo. Duplicate conflict aaye toh naya random code generate karke retry karo.\n\n```text\nServer A: INSERT abc1234 → success\nServer B: INSERT abc1234 → duplicate rejected\nServer B: generate xyz5678 → INSERT → success\n```\n\nPehle SELECT check, phir INSERT par rely mat karo. Dono servers same waqt “code absent hai” dekh sakte hain. UNIQUE constraint insert ke waqt final decision leti hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Approach 2: allocated ID ranges",
+        "body": "Cashiers ko alag ticket books do:\n\n```text\nServer 1 →       1–100,000\nServer 2 → 100,001–200,000\n```\n\nHar server apni range se locally counter increment kare; numeric ID ko Base62 mein encode kare. Ranges safely reserve hui hain toh overlapping IDs nahi banenge.\n\nAllocator = component jo ranges assign karta hai. ZooKeeper coordination mein help kar sakta hai; atomic database counter se bhi ranges reserve ho sakti hain. Redis ka mapping-cache role alag hai.",
+        "origin": "Source conversation",
+        "animation": "ranges"
+      },
+      {
+        "title": "Compare & interview answer",
+        "body": "**Random codes:** simple local generation, lekin collisions possible aur duplicate retry required.\n\n**Ranges:** non-overlapping reservation se generation collisions avoid; lekin durable allocator, exhaustion aur restart handling chahiye. Unused IDs waste ho sakti hain.\n\n“Main random code + DB uniqueness se start kar sakta hoon. Agar coordinated ID generation choose karein, toh disjoint ranges reserve karke IDs locally generate karunga. Dono mein har new URL ki mapping DB mein write karni padegi.”\n\nMillions of users ka matlab automatically DB crash nahi. Relevant metric new links/second aur DB capacity hai.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "Random codes: UNIQUE insert + duplicate retry.",
+      "Ranges: atomically and durably reserve non-overlapping IDs.",
+      "Dono approaches mein mapping writes required hain."
+    ],
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "clarifying-requirements",
+      "cache-expiry",
+      "redis-outage"
+    ]
+  },
+  {
+    "id": "redirect-flow",
+    "slug": "redirect-flow",
+    "topic": "URL shortener",
+    "tags": [
+      "Interview practice"
+    ],
+    "related": [],
+    "title": "What happens when someone opens a short link?",
+    "description": "Cache miss, missing link aur expiry ko ek flow mein samjho.",
+    "type": "Interview",
+    "difficulty": "Beginner",
+    "sections": [
+      {
+        "title": "Ticket se original address tak",
+        "body": "Short code ek ticket jaisa hai. User `/abc123` kholta hai; service us ticket ki mapping dhoondhti hai. Browser ko original URL abhi nahi pata.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Request ka complete flow",
+        "body": "1. URL service code ko Redis mein lookup kare.\n2. Cache hit ho toh URL aur expiry read kare.\n3. Cache miss ho toh database query kare.\n4. DB mein valid mapping mile toh Redis populate kare.\n5. Valid link ke liye service HTTP redirect return kare; browser original website khole.\n\n**Mapping missing:** 404 Not Found.\n\n**Mapping expired:** redirect mat karo; expired/unavailable response return karo. DB aur cache dono paths par expiry check chahiye.\n\n**302 redirect:** destination change ho sakta hai toh useful default. **301:** permanent; browser cache kar sakta hai, toh future clicks service tak na aayein.",
+        "origin": "Source conversation",
+        "animation": "redirect"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Service Redis-first lookup karegi. Miss par DB read, expiry validation aur cache population hoga. Valid mapping par redirect; missing ya expired link par no redirect.”\n\n**Common misunderstanding:** Redis/database browser ko redirect nahi karte. Service response mein **Location header** deti hai; browser us URL par request karta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Expired response ka example",
+        "body": "Expired link ke liye **410 Gone** choose kar sakte ho; 404 bhi product policy ho sakti hai. Exact status API contract mein decide karo. Important behavior: expired destination par redirect na ho.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Service mapping lookup karti hai aur redirect bhejti hai.",
+      "Missing aur expired links redirect nahi hone chahiye.",
+      "Cache hit aur DB miss path dono par expiry check karo."
+    ]
+  },
+  {
+    "id": "popular-links",
+    "slug": "popular-links",
+    "topic": "URL shortener",
+    "tags": [
+      "Interview practice"
+    ],
+    "related": [],
+    "title": "How would you stop millions of clicks from overwhelming the database?",
+    "description": "Popular link ki mapping ko har click par DB se mat padho.",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "sections": [
+      {
+        "title": "Intuition",
+        "body": "Shopkeeper ko sabse popular item ki price yaad hai. Har customer ke liye register nahi kholta. Popular short link ki mapping Redis mein rakhna bhi aisa hi hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple solution",
+        "body": "Pehla click cache miss kare toh DB se mapping lao aur Redis mein rakho. Baaki clicks Redis se mapping read karein. Har click ke liye DB query nahi hogi.\n\n```text\nPopular code abc123\nFirst valid miss → DB lookup → cache mapping\nLater hits       → Redis lookup → redirect\n```\n\nURL service ke multiple stateless instances load balancer ke peeche rakho. Stateless means mapping sirf ek server ki private memory mein depend nahi karti.\n\nAnalytics ko queue + worker mein process karo. Redirect ko click-count update complete hone ka wait mat karao.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Popular URL mappings Redis mein cache karunga, service instances scale karunga aur click analytics asynchronously process karunga. Isse frequent redirects database reads ko avoid karenge.”\n\nMillions of total clicks aur millions of clicks/second alag hain. Peak rate clarify karo.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Agar sab requests ek saath miss karein?",
+        "body": "Bahut requests same key ke liye ek saath DB read karein, ise **cache stampede** kehte hain. Supplementary improvement: same-key concurrent misses ko ek lookup mein combine karo, ya bounded coordination use karo. Cache outage mein DB fallback ko bhi limit karo; cache alone unlimited traffic handle karne ki guarantee nahi.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Popular mapping cache karo, har click par DB read nahi.",
+      "Service scaling aur async analytics bhi useful hain.",
+      "Concurrent misses aur cache outage ka load plan karo."
+    ]
+  },
+  {
+    "id": "cache-aside",
+    "slug": "cache-aside",
+    "title": "How would you use Redis? What happens on a cache miss?",
+    "type": "Interview",
+    "difficulty": "Beginner",
+    "topic": "URL shortener",
+    "description": "Cache-aside ko simple example se samjho.",
+    "sections": [
+      {
+        "title": "Redis ka role",
+        "body": "Phone number yaad hai toh quickly dial karte ho. Yaad nahi toh contacts book kholte ho. Redis fast lookup store hai; DB permanent mapping store hai. **Cache-aside** mein application khud cache check aur populate karti hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Hit aur miss ka example",
+        "body": "```text\nRequest: /abc123\n  ↓\nRedis GET link:abc123\n  ├─ Hit  → validate expiry → redirect\n  └─ Miss → DB lookup\n               ├─ Valid → cache URL + expiry → redirect\n               └─ Missing/expired → no redirect\n```\n\nCache miss error nahi hai — mapping cache mein absent hai, DB mein ho sakti hai. DB lookup succeed hone ke baad **Redis populate karna** mat bhoolo. Tab next request DB query avoid karegi.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“I will use cache-aside. Service Redis mein code check karegi; miss par DB se valid mapping laakar cache karegi aur redirect bhejegi. Missing/expired mapping par redirect nahi hoga.”\n\n**Common misunderstanding:** Popular URLs hi create nahi hote; any valid DB miss populate kar sakte hain. Cache capacity aur eviction policy decide karti hai kaunsi entries memory mein rehti hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Cache miss ka matlab DB record missing nahi.",
+      "Successful valid DB lookup ke baad cache populate karo.",
+      "Redis lookup fast karta hai; service redirect bhejti hai."
+    ],
+    "animation": "redirect",
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "design-url-shortener"
+    ]
+  },
+  {
+    "id": "cache-expiry",
+    "slug": "cache-expiry",
+    "title": "How would you prevent expired links from remaining usable through Redis?",
+    "type": "Interview",
+    "difficulty": "Beginner",
+    "topic": "URL shortener",
+    "description": "Cache ki expiry ko link ki expiry se align karo.",
+    "sections": [
+      {
+        "title": "Intuition",
+        "body": "Movie ticket 6 PM tak valid hai. Uski cached copy ko 7 PM tak valid rakhna galat hoga. Cache lifetime link lifetime se zyada nahi honi chahiye.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "TTL ka example",
+        "body": "**TTL = time to live:** kitni der baad Redis entry expire hogi.\n\n```text\nLink expires_at:       6:00 PM\nCurrent time:          5:50 PM\nRemaining lifetime:    10 minutes\n```\n\nAgar normal cache duration 1 hour hai, is entry ka TTL phir bhi maximum 10 minutes hoga.\n\n```text\nremaining = expires_at − current_time\nTTL = min(normal cache duration, remaining)\n```\n\nRemaining time zero ya negative ho toh link already expired hai — cache/redirect mat karo. Cached URL ke saath `expires_at` bhi store aur redirect se pehle check karo. DB miss path par bhi expiry check chahiye.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Redis TTL ko link ki remaining lifetime se cap karunga, aur cached expires_at ko redirect se pehle validate karunga. DB lookup par bhi expiry validate hogi.”\n\nExpiry ka matlab DB record physically delete hona zaroori nahi. Record reh sakta hai, lekin service use invalid treat karegi. **Early deletion** TTL alone immediately handle nahi karti; uske liye invalidation chahiye.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "TTL = min(cache duration, remaining link lifetime).",
+      "Zero/negative remaining lifetime → reject.",
+      "Scheduled expiry aur early deletion alag cases hain."
+    ],
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "clarifying-requirements",
+      "random-code-uniqueness",
+      "redis-outage"
+    ]
+  },
+  {
+    "id": "redis-outage",
+    "slug": "redis-outage",
+    "title": "If Redis goes down, how would redirects continue? What is the DB risk?",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "topic": "URL shortener",
+    "description": "Fallback useful hai, lekin sudden load ko samjho.",
+    "sections": [
+      {
+        "title": "Intuition",
+        "body": "Yaad kiye phone numbers available nahi hain toh contacts book use karo. Lekin poori city ek hi book maange toh line lag jaayegi. Redis outage mein DB ke saath bhi yahi risk hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Do failure cases",
+        "body": "**Primary Redis fail, replica available:** automatic failover configured ho toh replica take over kar sakti hai. Sirf replica banana automatic failover setup nahi hai.\n\n**Poora cache unavailable:** service DB lookup se redirects continue kar sakti hai. Lekin jo traffic Redis handle kar rahi thi, ab database par aayega. Connections, CPU aur read capacity overload ho sakti hain.\n\nHealthy mapping database mein hai, isliye cache loss automatically mapping loss nahi hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Configured Redis failover use karunga. Cache completely unavailable ho toh DB fallback possible hai, lekin fallback traffic database overload kar sakta hai. Isliye database capacity aur protective limits plan karunga.”",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Fallback ko controlled rakho",
+        "body": "Supplementary improvement: Redis requests ke short timeouts rakho. Unhealthy cache ko repeatedly wait karne ke bajaye temporarily skip karo — **circuit breaker** isi idea ka naam hai. DB concurrency bound karo aur zarurat par rate limit/temporary failure do. Har incoming request ko unlimited DB access dena safe fallback nahi.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Replica + configured failover primary failures mein help karta hai.",
+      "Cache outage mein DB reads suddenly badh sakti hain.",
+      "Fallback ko capacity aur limits ke saath design karo."
+    ],
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "clarifying-requirements",
+      "random-code-uniqueness",
+      "cache-expiry"
+    ]
+  },
+  {
+    "id": "cdc-invalidation",
+    "slug": "cdc-invalidation",
+    "title": "How would you invalidate a deleted link that is still cached?",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "topic": "URL shortener",
+    "description": "Application deletion aur direct DB deletion ko alag handle karo.",
+    "sections": [
+      {
+        "title": "Intuition",
+        "body": "Phone book se number delete hua, lekin tumhari memory mein abhi hai. DB change hone se Redis ko automatically pata nahi chalta. Cache ko explicitly update karna padta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Delete service se ho toh",
+        "body": "```text\nUser asks service to delete link\n  ↓\nDB mapping disable/delete\n  ↓\nRedis DEL link:abc123\n  ↓\nNext lookup: cache miss → DB unavailable → no redirect\n```\n\nDB delete succeed ho, Redis deletion fail ho sakti hai. Invalidation event durably record karo aur worker retries kare. **Transactional outbox**: DB transaction ke saath event bhi save hota hai; baad mein worker event process karta hai. TTL stale entry ke liye fallback bound deta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Direct DB delete ho toh CDC",
+        "body": "CDC = **Change Data Capture**. Database ke committed changes read karne ka mechanism. PostgreSQL + Debezium example:\n\n```text\nDELETE commits → PostgreSQL WAL → Debezium event\n→ invalidation worker → Redis key invalidate\n```\n\nWAL = write-ahead log, database changes ka log. Logical replication configured ho toh Debezium changes read kar sakta hai. Deleted row ki primary key `abc123` worker ko batati hai kaunsi cache entry remove karni hai. Pipeline pehle configure karni hogi; Redis apne aap DB observe nahi karta.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Delete service ke through ho toh DB update aur Redis invalidation karunga, failures ko durable retries se handle karunga. Direct DB changes capture karne ke liye CDC pipeline use kar sakta hoon.”\n\nDB commit aur cache invalidation ke beech delay hota hai: temporary stale redirects possible hain. Aur sirf DEL in-flight stale refill ko prevent nahi karta — next question mein woh race dekhenge.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "Service deletion → DB update + reliable cache invalidation.",
+      "Direct DB changes ke liye configured CDC useful hai.",
+      "Invalidation delay aur stale refill race ko acknowledge karo."
+    ],
+    "animation": "deletion",
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "stale-cache-race"
+    ]
+  },
+  {
+    "id": "stale-cache-race",
+    "slug": "stale-cache-race",
+    "title": "How could an in-flight request restore a deleted mapping? How would you prevent it?",
+    "type": "Interview",
+    "difficulty": "Advanced",
+    "topic": "URL shortener",
+    "description": "Timeline aur tombstone se race clear karo.",
+    "sections": [
+      {
+        "title": "Race, step by step",
+        "body": "In-flight request = request jo abhi processing mein hai. Request A DB read kar chuki hai, lekin abhi Redis mein result nahi likha.\n\n```text\n1. A: cache miss\n2. A: DB reads abc123 → example.com\n3. Delete: DB row removed\n4. Worker: Redis key deleted\n5. A: old URL writes back to Redis ❌\n```\n\nA ne URL **deletion se pehle read**, lekin **invalidation ke baad cache** kiya. DB mein ab naya change nahi hua, isliye CDC automatically doosra deletion event nahi bhejega.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Tombstone ka simple idea",
+        "body": "Tombstone = deletion marker. Key remove karne ke bajaye worker Redis mein `DELETED` value rakhe.\n\nCache fill ke liye **SET NX** use karo: NX means key absent ho tabhi write.\n\n```text\nRedis: link:abc123 → DELETED\nA: SET link:abc123 old-url NX\nRedis: key already exists → write rejected ✅\n```\n\nA rejected write ke baad current deletion marker respect kare aur apne stale URL se redirect na kare. Sirf cache write block karna enough nahi, agar request old URL se redirect phir bhi kar de.",
+        "origin": "Source conversation",
+        "animation": "deletion"
+      },
+      {
+        "title": "Simple interview answer & limits",
+        "body": "“Late readers invalidation ke baad old mapping cache kar sakte hain. Tombstone plus atomic conditional cache writes use karunga. Rejected writer deletion state respect karega.”\n\nMarker in-flight requests cover karne jitna long-lived rehna chahiye. Woh jaldi expire ho gaya toh old request key wapas likh sakti hai. Saare cache-fill writers ko protocol follow karna hoga. Yeh conceptual solution hai; immediate deletion guarantees stronger coordination maangti hain.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "Read-before-delete + cache-after-invalidation = stale refill.",
+      "DELETED marker + conditional writes late refill rok sakte hain.",
+      "Marker lifetime aur rejected-write handling critical hain."
+    ],
+    "animation": "deletion",
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "cdc-invalidation"
+    ]
+  },
+  {
+    "id": "range-recovery",
+    "slug": "range-recovery",
+    "title": "If a server crashes after using part of its ID range, how do you avoid duplicates?",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "topic": "URL shortener",
+    "description": "Fresh range means globally unused, not adjacent to the old range.",
+    "sections": [
+      {
+        "title": "Ticket book analogy",
+        "body": "Cashier ko 1–100,000 tickets ka book diya. 500 tickets issue karne ke baad book kho gaya. Remaining tickets dobara distribute karoge toh uncertainty aa sakti hai. Simple safe strategy: old allocation abandon karo, naya unassigned book do.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "```text\nServer 1:       1–100,000; used through 500; crashes\nServer 2: 100,001–200,000; keeps running\n```\n\nServer 1 ke 501–100,000 abandon hote hain; free pool mein wapas nahi jaate.\n\nAgar Server 2 agla 200,001–300,000 reserve kar chuka hai, restarted Server 1 ko **300,001–400,000** milega. Server 2 ko move karne ki zaroorat nahi. Server 1 apni fresh range se generate karega.\n\nAllocator ko har server ka used count jaan-na zaroori nahi; woh **globally reserved ranges** track karta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Range hand out karne se pehle allocator use durably aur atomically reserve karega. Restart par old range reuse nahi karunga; next globally unused range loonga. DB UNIQUE constraint final safeguard rahegi.”\n\n**Durable:** crash ke baad allocation record bacha rahe. **Atomic:** concurrent requests same range reserve na kar sakein. Gaps acceptable hain; uniqueness important hai.\n\nHar ID generate karte waqt DB check karna range allocation ka local-generation benefit reduce karega.",
+        "origin": "Source conversation"
+      }
+    ],
+    "takeaways": [
+      "Old unused IDs reissue mat karo.",
+      "Allocation durable aur atomic honi chahiye.",
+      "Restarted instance gets the next globally unused range."
+    ],
+    "animation": "ranges",
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "zookeeper-ranges"
+    ]
+  },
+  {
+    "id": "sequential-predictability",
+    "slug": "sequential-predictability",
+    "topic": "URL shortener",
+    "tags": [
+      "Interview practice"
+    ],
+    "related": [],
+    "title": "What downside do sequential Base62 IDs have compared with random codes?",
+    "description": "Base62 chhota representation hai, secrecy nahi.",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "sections": [
+      {
+        "title": "Source conversation ka point",
+        "body": "Yeh follow-up source chat mein poocha gaya tha. Uska detailed answer wahan complete nahi hua; neeche explanation supplementary hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Simple intuition",
+        "body": "Sequential house numbers dekh kar next address guess karna easy hai. Sequential short-link IDs bhi predictable ho sakti hain. Number ko Base62 mein likhne se uski representation badalti hai; number secret nahi ban jaata.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Example & downside",
+        "body": "```text\nNumeric IDs:       1000 → 1001 → 1002\nBase62 codes:      encode(1000), encode(1001), encode(1002)\n```\n\nAttacker code decode karke next number try kar sakta hai. Is tarah many links systematically discover karne ko **enumeration** kehte hain. Link creation/order/activity ke baare mein clues bhi mil sakte hain.\n\nRandom codes next value ko guess karna harder karte hain, lekin collision handling chahiye. Aur random URL bhi complete security guarantee nahi: link leak ya share ho sakta hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Simple interview answer",
+        "body": "“Sequential Base62 IDs predictable aur enumerable ho sakti hain. Base62 encoding encryption nahi hai. Random codes guessing harder karte hain, but private destinations ke liye access control still required hai.”\n\nAccess control means server check kare ki user ko content dekhne ki permission hai. Sirf difficult-to-guess URL ko private-data protection mat samjho.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Base62 encoding secrecy ya encryption nahi.",
+      "Sequential codes guessing/enumeration easy kar sakte hain.",
+      "Random codes private-content access control replace nahi karte."
+    ]
+  },
+  {
+    "id": "zookeeper-ranges",
+    "slug": "zookeeper-ranges",
+    "title": "Why use ZooKeeper for ID ranges?",
+    "type": "Interview",
+    "difficulty": "Intermediate",
+    "topic": "URL shortener",
+    "description": "Ticket books explain coordination versus caching.",
+    "sections": [
+      {
+        "title": "Intuition",
+        "body": "Teen cashiers ko alag ticket books: 1–100,000; 100,001–200,000; 200,001–300,000. Ab har cashier locally ticket issue karega, overlap nahi hoga.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "What ZooKeeper does",
+        "body": "ZooKeeper distributed servers ko coordinate karne ke primitives deta hai, jaise locks aur leader election. Range allocation logic application implement karti hai. Random codes se alag design: **unique numeric ID → Base62 representation**. Same number encode karoge toh same code milega.",
+        "origin": "Source conversation",
+        "animation": "ranges"
+      },
+      {
+        "title": "Strong interview answer",
+        "body": "“Allocate disjoint ranges atomically and durably. Each instance increments a local counter in its range, then reserves a new range when exhausted. ZooKeeper can coordinate allocation; an atomic database counter is another option. Redis in our initial design caches URL mappings, which is a separate role.”",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Trade-offs & follow-ups",
+        "body": "Har create par coordinator call nahi; ek range se 100,000 local IDs. Correct reservation collisions avoid karti hai. Mapping DB writes still required. Crash par range blindly reuse mat karo. ZooKeeper aur Redis ek hi system mein alag jobs kar sakte hain.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Sequential code downside",
+        "body": "Chat mein yeh question poocha gaya, lekin answer develop nahi hua. Supplementary answer: sequential IDs predictable hain; next code guess karke links enumerate karna aasaan ho sakta hai. Base62 encryption nahi hai. Random codes guessing harder karte hain, lekin private content ke liye access control phir bhi chahiye.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Coordination and caching are different jobs.",
+      "Ranges must be non-overlapping and durably reserved.",
+      "Base62 represents a number; it does not make it secret."
+    ],
+    "animation": "ranges",
+    "tags": [
+      "Distributed systems"
+    ],
+    "related": [
+      "range-recovery"
+    ]
+  }
+]

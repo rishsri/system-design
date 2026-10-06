@@ -1,0 +1,169 @@
+{
+  "redirect": {
+    "title": "Short link click hua. Ab kya hoga?",
+    "nodes": [
+      "Browser",
+      "URL service",
+      "Redis",
+      "Database",
+      "Website"
+    ],
+    "steps": [
+      {
+        "title": "1. Browser request bhejta hai",
+        "body": "User sho.rt/abc123 kholta hai. Request URL service tak aati hai — long URL abhi browser ko nahi pata.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "GET /abc123"
+      },
+      {
+        "title": "2. Service Redis mein dekhti hai",
+        "body": "abc123 ki mapping cache mein hai? Hit ho toh DB ki zaroorat nahi. Is example mein cache miss hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "Redis: mapping nahi mili"
+      },
+      {
+        "title": "3. Cache miss → database lookup",
+        "body": "Service DB se long URL aur expires_at laati hai. Missing ya expired mapping ho toh redirect nahi karegi.",
+        "active": [
+          1,
+          3
+        ],
+        "note": "abc123 → https://example.com"
+      },
+      {
+        "title": "4. Valid mapping ko cache karo",
+        "body": "DB se URL mil gaya. Redis mein mapping aur expiry store karo, taaki next click par DB read bach jaaye.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "TTL = min(cache duration, remaining lifetime)"
+      },
+      {
+        "title": "5. Browser original website kholta hai",
+        "body": "Service 302 response mein Location header bhejti hai. Browser us address par nayi request karta hai. Redis redirect nahi bhejta.",
+        "active": [
+          0,
+          1,
+          4
+        ],
+        "note": "302 · Location: https://example.com"
+      }
+    ]
+  },
+  "ranges": {
+    "title": "Har server ki apni ticket book",
+    "nodes": [
+      "Allocator",
+      "Server 1",
+      "Server 2"
+    ],
+    "steps": [
+      {
+        "title": "1. Server 1 ko range milti hai",
+        "body": "Allocator 1–100,000 durably reserve karta hai. Server 1 is range se locally IDs generate kar sakta hai.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "S1: 1–100,000 · next available: 100,001"
+      },
+      {
+        "title": "2. Server 2 ko alag range milti hai",
+        "body": "Server 2 ko 100,001–200,000 milti hai. Dono independent kaam karte hain; ranges overlap nahi hoti.",
+        "active": [
+          0,
+          2
+        ],
+        "note": "S2: 100,001–200,000 · next available: 200,001"
+      },
+      {
+        "title": "3. Server 1 crash ho gaya",
+        "body": "ID 500 tak use hua. Restart par 501–100,000 dobara issue nahi karenge. Gaps okay hain; duplicates nahi.",
+        "active": [
+          1
+        ],
+        "note": "S1: down · unused IDs stay reserved"
+      },
+      {
+        "title": "4. Server 2 nayi range reserve karta hai",
+        "body": "Apni pehli range khatam karke Server 2 allocator se 200,001–300,000 reserve karta hai. Woh automatically next IDs use nahi karta.",
+        "active": [
+          0,
+          2
+        ],
+        "note": "S2: 200,001–300,000 · next available: 300,001"
+      },
+      {
+        "title": "5. Server 1 fresh range leta hai",
+        "body": "Server 1 restart hua. Ab next globally unused range 300,001–400,000 milti hai. Request ko doosre server par move karne ki zaroorat nahi.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "S1: 300,001–400,000 · next available: 400,001"
+      }
+    ]
+  },
+  "deletion": {
+    "title": "Purani mapping ko wapas aane se roko",
+    "nodes": [
+      "Request A",
+      "Database",
+      "CDC worker",
+      "Redis"
+    ],
+    "steps": [
+      {
+        "title": "1. A ko cache miss mila",
+        "body": "Request A DB se URL padhti hai. Is waqt mapping valid hai. Abhi A ne cache populate nahi kiya.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "A holds the old URL"
+      },
+      {
+        "title": "2. DB se link delete hua",
+        "body": "A ke read ke baad DB deletion commit hoti hai. A ke paas ab stale result hai — woh deletion ke baare mein abhi nahi jaanti.",
+        "active": [
+          1
+        ],
+        "note": "Database: mapping deleted"
+      },
+      {
+        "title": "3. CDC deletion event laata hai",
+        "body": "WAL se committed change read karke CDC worker ko batata hai. Sirf DEL karenge toh A baad mein old mapping wapas likh sakti hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "Delete event: abc123"
+      },
+      {
+        "title": "4. Redis mein DELETED marker rakho",
+        "body": "Worker tombstone likhta hai: key ab absent nahi, DELETED hai. Yeh marker in-flight requests cover karne jitna long-lived hona chahiye.",
+        "active": [
+          2,
+          3
+        ],
+        "note": "link:abc123 → DELETED"
+      },
+      {
+        "title": "5. A ka SET NX reject hota hai",
+        "body": "A cache fill karti hai, lekin key already present hai. Conditional write reject hoti hai. A ko marker respect karna hai aur stale URL se redirect nahi karna.",
+        "active": [
+          0,
+          3
+        ],
+        "note": "SET NX blocked · no stale redirect"
+      }
+    ]
+  }
+}
