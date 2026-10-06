@@ -15,3 +15,7 @@ Animation text, nodes and steps live in `src/data/walkthroughs.json`. Framer Mot
 Content is loaded directly from committed JSON, not browser storage. There is no editor, import/export, bookmark dashboard or account system. Old browser notebook data is left untouched and unused. Only theme preference is stored locally. Changes to JSON reload during development; rebuild to publish them.
 
 For deployment, serve `dist` with SPA fallback to `index.html`. Mermaid is loaded on demand; build warnings about its larger diagram chunks are non-blocking.
+
+## Agent startup instructions
+
+Agents should start with [AGENTS.md](AGENTS.md), then read [the system design writing guide](docs/SYSTEM_DESIGN_WRITING_GUIDE.md) before changing learning content. The guide defines beginner Hinglish voice, realistic interview-answer progression, source attribution, architecture diagrams, Framer Motion walkthroughs, and JSON authoring.
