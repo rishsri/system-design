@@ -165,5 +165,223 @@
         "note": "SET NX blocked · no stale redirect"
       }
     ]
+  },
+  "search": {
+    "title": "Samsung search ki request andar kaise chalegi?",
+    "nodes": [
+      "React",
+      "Flask API",
+      "Coordinator",
+      "Shard copies",
+      "Results"
+    ],
+    "steps": [
+      {
+        "title": "1. User query bhejta hai",
+        "body": "React text aur allowed filters API ko bhejta hai. API validation aur permissions apply karegi.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "GET /api/search?q=Samsung"
+      },
+      {
+        "title": "2. Coordinator kaam baantta hai",
+        "body": "Relevant shard groups ki ek-ek copy select hoti hai. Primary aur replica dono ko same query chalana required nahi.",
+        "active": [
+          1,
+          2,
+          3
+        ],
+        "note": "Query phase → one copy per shard group"
+      },
+      {
+        "title": "3. Local Lucene candidates nikaalta hai",
+        "body": "Har selected shard analyzed terms ki posting lists use karke candidates aur local scores nikaalta hai.",
+        "active": [
+          3
+        ],
+        "note": "Local top IDs + scores"
+      },
+      {
+        "title": "4. Coordinator winners choose karta hai",
+        "body": "Shard candidates merge hote hain. Selected hits ke fields fetch kiye jaate hain.",
+        "active": [
+          2,
+          3
+        ],
+        "note": "Merge top 10 → fetch selected hits"
+      },
+      {
+        "title": "5. Results UI tak aate hain",
+        "body": "ES response API ko, API structured JSON React ko deti hai. Missing shards/timeout ko API handle karti hai.",
+        "active": [
+          0,
+          1,
+          4
+        ],
+        "note": "Ranked results; partial failures checked"
+      }
+    ]
+  },
+  "indexing": {
+    "title": "Product bana. Search mein abhi kyun nahi aaya?",
+    "nodes": [
+      "Flask",
+      "PostgreSQL + Outbox",
+      "Publisher",
+      "Queue + Worker",
+      "Elasticsearch"
+    ],
+    "steps": [
+      {
+        "title": "1. Dono records same transaction",
+        "body": "Product aur indexing intent saath commit hote hain. Dono ya koi nahi.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "product 103 + event 501 → COMMIT"
+      },
+      {
+        "title": "2. API creation acknowledge karti hai",
+        "body": "201 ka matlab product committed hai. Search ready hona abhi promised nahi.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "201 Created; search indexing pending"
+      },
+      {
+        "title": "3. Publisher confirmed delivery karta hai",
+        "body": "Pending event broker ko bhejta hai, confirmation ke baad published mark. Crash gap duplicates la sakta hai.",
+        "active": [
+          1,
+          2,
+          3
+        ],
+        "note": "Stable event_id=501"
+      },
+      {
+        "title": "4. Worker indexing karta hai",
+        "body": "Queue se event leta hai. Same product ID aur version guard ke saath ES write karta hai; temporary failure par bounded retry.",
+        "active": [
+          3,
+          4
+        ],
+        "note": "_id=103, version=2"
+      },
+      {
+        "title": "5. ACK, phir search visibility",
+        "body": "Successful handling par ACK. Search ke liye refresh visibility phir bhi required ho sakti hai; indexing aur refresh delays alag.",
+        "active": [
+          3,
+          4
+        ],
+        "note": "ACK ≠ immediate _search visibility"
+      }
+    ]
+  },
+  "replicas": {
+    "title": "Node A gaya. Product copy pehle se kahan thi?",
+    "nodes": [
+      "Node A: P0 + R2",
+      "Node B: P1 + R0",
+      "Node C: P2 + R1"
+    ],
+    "steps": [
+      {
+        "title": "1. Healthy placement",
+        "body": "Three partition groups hain. Har group ki primary aur replica different nodes par already placed hain.",
+        "active": [
+          0,
+          1,
+          2
+        ],
+        "note": "500 unique products · 6 copies"
+      },
+      {
+        "title": "2. Node A unavailable",
+        "body": "P0 aur R2 unavailable. P0 ki existing replica R0 Node B par abhi bhi hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "Group 0: R0 survives; group 2: P2 survives"
+      },
+      {
+        "title": "3. Eligible replica promote",
+        "body": "Healthy cluster coordination ke saath R0 new primary ban sakti hai. Crash ke baad dead node se copy nahi aa rahi.",
+        "active": [
+          1
+        ],
+        "note": "R0 → P0 on Node B"
+      },
+      {
+        "title": "4. Search relevant groups cover karegi",
+        "body": "Group 0/1/2 ki surviving copies targeted search execute karti hain. Replicas rebuild ke dauraan redundancy reduced ho sakti hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "All 3 groups available under these assumptions"
+      }
+    ]
+  },
+  "dictionary": {
+    "title": "samsug → dictionary term → matching documents",
+    "nodes": [
+      "Query: samsug",
+      "Term dictionary",
+      "Term: samsung",
+      "Posting list",
+      "Ranked hits"
+    ],
+    "steps": [
+      {
+        "title": "1. Query analyze hui",
+        "body": "Lowercase token samsug hai. Engine ko correct brand pehle se guess nahi hua.",
+        "active": [
+          0
+        ],
+        "note": "Input token: samsug"
+      },
+      {
+        "title": "2. Edit constraint set hui",
+        "body": "Allowed edits aur exact prefix ke basis par nearby indexed terms explore ho sakti hain. Lucene automata dictionary traversal prune kar sakti hain.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "Fuzziness 1; candidate search"
+      },
+      {
+        "title": "3. samsung fits",
+        "body": "samsug mein n insert karne se samsung banta hai. Candidate term dictionary mein exist karta hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "samsug → samsung · 1 insertion"
+      },
+      {
+        "title": "4. Ab documents nikaalo",
+        "body": "Matched term ki posting list se document candidates milte hain. Har product text par raw fuzzy scan nahi.",
+        "active": [
+          2,
+          3
+        ],
+        "note": "samsung → document references"
+      },
+      {
+        "title": "5. Matching ke baad ranking",
+        "body": "BM25 aur configured boosts decide karte hain. Galaxy aur Charger mein same term ho toh Galaxy automatically winner nahi.",
+        "active": [
+          3,
+          4
+        ],
+        "note": "No semantic brand preference invented"
+      }
+    ]
   }
 }

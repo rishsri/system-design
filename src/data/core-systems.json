@@ -1,0 +1,1470 @@
+[
+  {
+    "id": "core-elasticsearch",
+    "slug": "core-elasticsearch",
+    "title": "Elasticsearch: search ko andar se samjho",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "System design",
+    "tags": [
+      "Core Systems",
+      "Elasticsearch",
+      "Lucene",
+      "Search",
+      "PostgreSQL",
+      "Queues"
+    ],
+    "description": "Ek phone shop ki search banao: words, ranking, budget aur stock rules ko khud change karke samjho. Phir shards, reliable indexing aur interview practice.",
+    "sections": [
+      {
+        "title": "Pehle picture samjho",
+        "body": "Aaj tum ek small phone shop ki search bana rahe ho. Customer `Samsng Galaxy` type karta hai. Owner ki demand: “Spelling galat ho tab bhi products milne chahiye. Budget follow karo. Sold-out ko hide ya neeche karne ka option do.”\n\nYahi story follow karke har mechanism samjhenge. **Pehle predict karo, phir control badlo, phir explanation padho.** Koi forced quiz nahi; examples tumhari pace par chalenge.\n\n### Chhote rounds mein padho\n1. [Word se result tak](#section-1)\n2. [Query ko tune karo](#section-18)\n3. [Phrase aur typo pakdo](#section-21)\n4. [System ke boxes samjho](#section-11)\n5. [Do sources ko race karao](#section-23)\n\nTechnical detail chahiye toh full chapter neeche hai. First pass mein saare formulas aur code ek saath yaad karne ki zaroorat nahi. Each lab ke paas uska reason aur limitation diya hai.\n\nIs lesson mein tumhare dono shared chats, Chapter 11 ki coverage aur separately labelled additional explanations use hue hain. Naye visuals browser simulations hain; real infrastructure ya measured benchmark nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Inverted index: word se document tak",
+        "body": "Book ke last pages wala index socho: “Caching → pages 12, 48”. Har page padhne ki jagah seedha relevant pages par jaate ho. Inverted index bhi **term → matching document references** rakhta hai.\n\n| ID | Document |\n|---|---|\n| 1 | React is fast |\n| 2 | Python is powerful |\n| 3 | React and Python are popular |\n\nSimplified lowercase mapping:\n```text\nreact  → [1, 3]\npython → [2, 3]\nfast   → [1]\n```\n`react` lookup se candidates 1 aur 3 milte hain. Ye mapping **indexing ke waqt** banti hai; har search par dobara nahi banti. React frontend ye index nahi banata. Elasticsearch server ke andar Lucene searchable structures maintain karta hai.\n\nList ko **posting list** bolte hain: ek term kaunse documents mein present hai. Actual Lucene structure simple JavaScript object nahi: compressed document IDs, term frequency, aur configured text fields ke liye positions jaise details ho sakte hain. Positions phrase search mein kaam aati hain.\n\nIndex ka cost bhi hai: extra disk, indexing CPU aur updates. Har query constant-time nahi hoti; common term ke bahut candidates ho sakte hain. Benefit ye hai ki text ke liye har original document scan karna zaroori nahi.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "AND, OR aur minimum matching",
+        "body": "`React Python` query ka matlab developer decide karta hai. Typical lexical `match` query mein default **OR** hai: ek term bhi mile toh eligible. **AND** mein dono terms chahiye.\n\n- OR: `[1,3] ∪ [2,3] = [1,2,3]` — union matlab dono lists ke saare unique IDs.\n- AND: `[1,3] ∩ [2,3] = [3]` — intersection matlab common IDs.\n\n```json\n{\"query\":{\"match\":{\"text\":{\"query\":\"React Python\",\"operator\":\"and\"}}}}\n```\n`Samsung 5G Phone` ke liye AND bahut strict aur OR bahut broad ho sakta hai. `minimum_should_match: \"2\"` se kam se kam do analyzed terms match karwa sakte ho. `Samsung Phone` eligible hoga; `Samsung TV` nahi.\n\n**Matching aur ranking alag hain.** Matching eligibility decide karti hai. Ranking eligible documents ka order decide karti hai. Dono words match hone se high score aa sakta hai, lekin har corpus mein guaranteed winner bolna galat hai.\n\nNeeche query aur policy change karke posting lists aur actual eligible documents dekho. Ye small browser simulation hai; real Elasticsearch query execution nahi.",
+        "origin": "Source conversation",
+        "lab": "matching"
+      },
+      {
+        "title": "Analyzer: text searchable kaise banta hai?",
+        "body": "Dukaan mein same cheez `Samsung`, `SAMSUNG`, `samsung` likhi ho, toh teen alag brands nahi hain. **Analyzer** raw text ko search tokens mein convert karta hai.\n\nTypical pipeline: **character filters → tokenizer → token filters**. Character filter input ko clean/transform kar sakta hai. Tokenizer text ko pieces mein baantta hai. Token filters lowercase, stemming ya stop-word handling kar sakte hain.\n\n```mermaid\nflowchart TD\n A[Samsung 5G Phone] --> B[Standard tokenizer]\n B --> C[Lowercase filter]\n C --> D[samsung / 5g / phone]\n D --> E[Per-field inverted index]\n```\n**Standard analyzer automatically English stemming nahi karta.** Language analyzer configure karoge tab `phones → phone`, `running → run` jaise changes ho sakte hain. Hinglish aur product IDs par English stemming blindly use mat karo; `S25` ka meaning preserve karna hai.\n\nIndex-time aur search-time analysis compatible honi chahiye. Ek taraf `phone`, doosri taraf sirf exact `phones` term query bhej doge toh mismatch ho sakta hai. Debug karne ke liye `_analyze` API:\n```json\n{\"analyzer\":\"standard\",\"text\":\"Samsung 5G Phone\"}\n```\nIs body ko `POST /_analyze` par bhejo. Tokens inspect karo, assumptions nahi. [Elastic: analysis](https://www.elastic.co/docs/manage-data/data-store/text-analysis).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "BM25: result upar kaun aayega?",
+        "body": "Inverted index batata hai **kahan word hai**. BM25 batata hai **matching document kitna relevant ho sakta hai**. Ye default lexical similarity hai, human intelligence ka substitute nahi.\n\n**TF — Term Frequency:** ek document mein term kitni baar aaya. Repeating `React` helpful ho sakta hai, lekin har repeat ka benefit kam hota jaata hai: saturation.\n\n**IDF — Inverse Document Frequency:** term collection mein kitna rare hai. Source example: Samsung 1 lakh documents mein hai, 5G sirf 100 mein. Baaki conditions comparable hon toh rarer 5G zyada contribution de sakta hai.\n\n**Length normalization:** chhote focused field mein term match ko benefit mil sakta hai. Lekin `React Python` hamesha `React React React React Python` ko beat karega—ye guarantee nahi. Corpus statistics, parameters aur field configuration matter karte hain.\n\nRanking sirf matched-words count nahi. Name ko description se zyada importance deni ho toh field boost kar sakte ho. Business sorting aur relevance ko consciously balance karo; lowest price ko relevance ka synonym mat samjho.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "BM25 ko numbers ke saath dekho",
+        "body": "Single field ke liye educational BM25 formula:\n```text\nIDF(t) = ln(1 + (N - df(t) + 0.5) / (df(t) + 0.5))\ntermScore = IDF(t) × tf × (k1 + 1)\n            / (tf + k1 × (1 - b + b × dl / avgdl))\nscore = sum of query term contributions\n```\n`N` documents ki count; `df` kitne documents mein term hai; `tf` current document mein occurrences; `dl` current field length; `avgdl` average length. `k1` repetition saturation control karta hai; `b` length normalization. Lab mein defaults `k1=1.2`, `b=0.75` hain.\n\nNeeche React repeats change karo. Har baar corpus length aur average recalculate hote hain. Ye do-document teaching model hai; actual distributed Elasticsearch mein shard-local statistics, analyzers, boosts aur query shape se scores differ kar sakte hain. `_explain` ek document ka score breakdown samajhne mein help karta hai; expensive diagnostic ko har request par mat chalao.\n\n[Elastic: similarity settings](https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity).",
+        "origin": "Supplementary explanation",
+        "lab": "ranking"
+      },
+      {
+        "title": "PostgreSQL: B-tree, GIN aur substring",
+        "body": "“PostgreSQL hamesha 10 lakh rows scan karega” sahi nahi. Query aur index ka match important hai.\n\n**B-tree** sorted keys aur pointers ka structure hai. Equality aur ranges ke liye useful. `LIKE 'Samsung%'` ek starting range identify kar sakta hai, suitable collation/operator class ke saath. `LIKE '%Samsung%'` mein starting point nahi milta. Case-insensitive `ILIKE` ke liye plain B-tree ko automatically suitable assume mat karo.\n\n**GIN — Generalized Inverted Index** searchable elements ko rows se map karta hai. PostgreSQL full-text search mein `to_tsvector` lexemes banata hai; GIN unhe index karta hai.\n```sql\nCREATE TABLE products (id bigint PRIMARY KEY, name text NOT NULL);\nCREATE INDEX products_search_idx ON products\nUSING GIN (to_tsvector('english', name));\n\nSELECT * FROM products\nWHERE to_tsvector('english', name)\n      @@ plainto_tsquery('english', 'Samsung phones');\n```\n`@@` full-text match operator hai. Query expression ko indexed expression se compatible rakho. `to_tsvector('english', 'Samsung phones are running')` roughly `phone`, `run`, `samsung` lexemes with positions banata hai.\n\nFTS GIN index se existing `LIKE '%Samsung%'` automatically fast nahi ho jaati. Substring ke liye `pg_trgm` extension ka trigram GIN/GiST index alag mechanism hai. **Trigram** teen-character pieces par matching karta hai; word search aur arbitrary substring ko mix mat karo.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Postgres practical: title ko zyada importance do",
+        "body": "**Mini story:** shop owner bolta hai, “Samsung title mein ho toh zyada useful. Description mein casually mention hua ho toh lower.” Is rule ke liye separate search cluster turant add karna zaroori nahi.\n\n`tsvector` normalized lexemes aur positions rakhta hai. `tsquery` search condition hai. **GIN candidate lookup ko speed up karta hai; `ts_rank` matching rows ka score nikaalta hai.** Ye teen alag roles hain.\n\nExisting `products(id, name)` example ko extend karo:\n```sql\nALTER TABLE products ADD COLUMN description text;\nALTER TABLE products ADD COLUMN search_vec tsvector\nGENERATED ALWAYS AS (\n  setweight(to_tsvector('english', coalesce(name, '')), 'A') ||\n  setweight(to_tsvector('english', coalesce(description, '')), 'B')\n) STORED;\nCREATE INDEX products_weighted_fts_idx\nON products USING GIN(search_vec);\n```\n`coalesce` null ko empty string banata hai. A/B labels title/body ko distinguish karte hain; ranking function ke weights unki importance set karte hain. Stored generated column row change par recalculate hoti hai; manually har search par vector rebuild nahi kar rahe.\n\n```sql\n-- :query_text ko database driver se bind karo, string concatenate nahi.\nWITH input AS (\n  SELECT plainto_tsquery('english', :query_text) AS terms\n)\nSELECT p.id, p.name, ts_rank(p.search_vec, input.terms) AS rank\nFROM products AS p CROSS JOIN input\nWHERE p.search_vec @@ input.terms\nORDER BY rank DESC, p.id\nLIMIT 20;\n```\n`:query_text` named bind notation hai—actual driver `%s`, `$1` ya another placeholder use kar sakta hai. `plainto_tsquery` plain input ke surviving words ko AND se jodta hai. Search-box syntax jaise quoted phrase, `OR`, `-excluded` chahiye toh `websearch_to_tsquery` evaluate karo. Query parser aur SQL parameter binding dono alag jobs solve karte hain.\n\n**Important correction:** built-in PostgreSQL `ts_rank` ko BM25 mat bolo. Woh frequency/weights based ranking hai; `ts_rank_cd` proximity-aware cover density deta hai. Native functions aur Elasticsearch BM25 equivalent scores nahi hain. [PostgreSQL: ranking and query parsing](https://www.postgresql.org/docs/current/textsearch-controls.html) · [Generated search vectors](https://www.postgresql.org/docs/current/textsearch-tables.html).\n\n**Ek line mein:** vector searchable document hai, query condition hai, GIN shortlist hai, rank ordering hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Speed detective: EXPLAIN aur fair benchmark",
+        "body": "“Mere laptop par fast tha” useful clue hai, performance proof nahi. Pehle dekho engine **kaam kya kar raha hai**.\n\n```sql\nEXPLAIN (ANALYZE, BUFFERS)\nSELECT id, name FROM products\nWHERE name ILIKE '%Samsung%'\nLIMIT 20;\n```\n`ANALYZE` query actually run karta hai. `BUFFERS` page hits/reads dikhata hai. Plan mein **Seq Scan** aaye toh rows sequentially inspect ho rahi hain. **Bitmap Index Scan + Bitmap Heap Scan** indexed candidate locations collect karke table rows read kar sakte hain. `Rows Removed by Filter`, actual rows/time aur loop counts dekho. Planner estimates aur actual numbers alag ho sakte hain.\n\nTeen apples-to-apples experiments rakho:\n\n| Experiment | Kya measure karna hai |\n|---|---|\n| Contains query | ILIKE, same LIMIT; trigram index ke saath/bina |\n| Word search | PostgreSQL FTS + GIN, same returned fields/top-N |\n| Search engine | Elasticsearch equivalent intent, same payload size/top-N |\n\nSubstring aur word search exact same semantics nahi dete. Example: `phone` vs `headphones` ka result differ ho sakta hai. Correctness compare kiye bina latency winner choose mat karo.\n\nReference chapter ka 50k-review benchmark ek particular setup ka observation hai, hamare app ka measurement nahi. Usse universal “ES always 500ms” ya “Postgres always seconds” infer nahi karenge. Same region bhi identical network path/resource sizing prove nahi karti.\n\n**Fair run:** representative queries, same limits/fields, warm aur cold cache alag, repeated runs with p50/p95/p99, concurrency, data/index size, hardware aur client/server time record karo. p95 ka matlab 95% observed requests us duration tak complete hui. Broad queries, filters aur sort/aggregations bhi include karo.\n\n**Small twist:** broad match par optimizer Seq Scan choose kare toh index broken hona zaroori nahi; bahut rows fetch karni hon toh scan cheaper ho sakti hai. Fixed O(log n) total latency claim mat karo—candidate count, ranking, fetch aur output size bhi cost hain. [PostgreSQL: reading EXPLAIN](https://www.postgresql.org/docs/current/using-explain.html).\n\n**Try in your own DB:** same query repeat karo, phir buffers/time compare karo. Website invented benchmark numbers plot nahi karti.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "PostgreSQL ya Elasticsearch?",
+        "body": "50,000 products, basic keyword search, PostgreSQL already hai: pehle PostgreSQL FTS evaluate karo. Ye hard cutoff nahi; 50k aur millions examples hain, product-selection rules nahi.\n\n| Requirement | PostgreSQL FTS | Elasticsearch |\n|---|---|---|\n| Word search | tsvector + GIN | Analyzer + Lucene index |\n| Ranking | ts_rank / ts_rank_cd | BM25, boosts, search tooling |\n| Typo tolerance | pg_trgm etc. evaluate | Fuzzy matching options |\n| Transactional source data | Same DB transaction | Separate synchronization required |\n| Distributed search | Extra architecture | Shards and replicas built in |\n| Operations | Existing DB operate karna | Separate cluster, sync, monitoring |\n\nRich autocomplete, tuned relevance, aggregations aur independent search scaling ki actual need ho toh Elasticsearch evaluate karo. “SQL slow, ES fast” answer incomplete hai. Representative data par query latency, indexing throughput aur operating cost measure karo.\n\nSource chat ki important correction: **search outage fallback aur missing indexed data do alag problems hain**. Redis cached results availability improve kar sakte hain. Jo product Elasticsearch tak kabhi pahucha hi nahi, uske liye reliable sync chahiye.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Architecture: cluster se Lucene tak",
+        "body": "**Cluster** cooperating Elasticsearch nodes ka group. **Node** ek running instance. **Index** related documents ka logical collection, jaise `products-v1`. **Primary shard** index ka partition; har shard ek Lucene index hai. **Replica shard** primary ki copy hai.\n\n```mermaid\nflowchart TD\n U[React search UI] --> A[Flask Search API]\n A --> C[Elasticsearch coordinating node]\n C --> S0[Shard group 0: choose one copy]\n C --> S1[Shard group 1: choose one copy]\n C --> S2[Shard group 2: choose one copy]\n S0 --> L0[Local Lucene index]\n S1 --> L1[Local Lucene index]\n S2 --> L2[Local Lucene index]\n```\n10 lakh documents aur 3 primary shards ho toh roughly 3.33 lakh per shard ho sakte hain; exact equal allocation guaranteed nahi. Har shard apne documents ka index maintain karta hai.\n\n3 primaries aur **1 replica per primary** = `3 × (1+1) = 6 shard copies`. Ye 6 independent data partitions nahi. Replica search serve kar sakti hai aur eligible copy failover mein promote ho sakti hai. Primary aur uski replica same node par allocate nahi hote.\n\nMore shards always faster nahi. Coordination, memory, segment metadata aur file handles bhi badhte hain. Query patterns, actual index size aur growth ke basis par shard strategy choose karo.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "500 products, 3 nodes: copy kahan rahegi?",
+        "body": "Naye chat mein ek useful confusion aaya: “Coordinator ke andar nodes hote hain?” **Nahi.** Coordinator bhi ek node ki role hai; baaki nodes uske containers nahi. Aur shard ka replica hota hai, poori machine ka automatic twin nahi.\n\n500 products ka teaching example lo. Primary groups mein approximately 167 + 167 + 166 products hain. One replica each, placement aisa ho sakta hai:\n```mermaid\nflowchart TD\n subgraph A[Node A]\n P0[Primary 0: 167 products]\n R2[Replica 2: 166 copied products]\n end\n subgraph B[Node B]\n P1[Primary 1: 167 products]\n R0[Replica 0: 167 copied products]\n end\n subgraph C[Node C]\n P2[Primary 2: 166 products]\n R1[Replica 1: 167 copied products]\n end\n P0 -. replication .-> R0\n P1 -. replication .-> R1\n P2 -. replication .-> R2\n```\nUnique catalogue **500 products**, physical shard copies **6**. Ek node multiple primary/replica shards host kar sakta hai; one-shard-per-node rule nahi.\n\nNode A down hua toh R0 **already Node B par** hai. Failure ke baad vanished machine se data copy karna start nahi kar rahe. Healthy eligible R0 ko promote karke group 0 restore ho sakta hai. Group 2 ka primary Node C par alive hai, though replica R2 lost hai. Is placement mein ek copy per group survives; valid cluster coordination aur healthy copies condition hain.\n\nFull-text query `iPhone 17` ka matching shard pehle se generally known nahi. Relevant shard groups parallel search karte hain; shard 0 mein first match milte hi request stop nahi hoti. Doosre shard ka better candidate ho sakta hai. GET by known ID/routing targeted ho sakta hai—ye full-text scatter-gather se different hai.\n\n**Yaad rakhne ka trick:** shard = partition, node = host, replica = existing shard copy, coordinator = request ko organize karne wala role. [Elastic: distributed reads/writes](https://www.elastic.co/docs/deploy-manage/distributed-architecture/reading-and-writing-documents).",
+        "origin": "Supplementary explanation",
+        "animation": "replicas"
+      },
+      {
+        "title": "Document routing aur node failure",
+        "body": "Courier ko pata hona chahiye parcel kis warehouse mein jaayega. Elasticsearch bhi document ID/routing se shard group choose karta hai. Default routing document ID par based hoti hai. Conceptually `hash(routing) → shard`; real implementation routing-shard settings bhi use karti hai, isliye simple modulo ko universal code mat samjho.\n\n```mermaid\nflowchart LR\n C[Coordinator] --> P[Node A: Primary 0]\n P --> R[Node B: Replica 0]\n R -. eligible promotion after failure .-> N[New Primary 0]\n```\nWrite primary par route hoti hai; primary operation validate/apply karke replica operations coordinate karta hai. Healthy in-sync copies aur acknowledgment rules matter karte hain. Replica hone ka matlab saari requested replicas har waqt allocated hain—aisa nahi. `wait_for_active_shards` admission check configure ho sakta hai; backup guarantee nahi.\n\nData nodes shard data rakhte hain; master-eligible nodes cluster state aur allocation decisions coordinate karte hain. Master har search ka compulsory gateway nahi. Valid cluster coordination aur available eligible replica ho tab primary promotion ho sakti hai. Sab shard copies lose ho gayi toh promotion se data wapas nahi aata: snapshots/rebuild chahiye.\n\n**Green:** primary+replica allocations complete. **Yellow:** primaries available, kuch replicas missing. **Red:** kuch primaries unavailable. Status alone latency ya overall app correctness prove nahi karta. [Elastic: reading/writing](https://www.elastic.co/docs/deploy-manage/distributed-architecture/reading-and-writing-documents).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Search flow: query phase, phir fetch",
+        "body": "User `Samsung 5G Phone` search karta hai. API query bhejti hai. Coordinating node relevant shard groups mein se **ek copy per group** ko search karwata hai. Har primary aur replica ko duplicate search bhejna required nahi.\n\n```mermaid\nsequenceDiagram\n participant UI as React\n participant API as Flask\n participant C as Coordinator\n participant S as Relevant shard copies\n UI->>API: GET /api/search?q=Samsung\n API->>C: Search DSL with size 10\n C->>S: Query phase\n S-->>C: Candidate IDs and scores\n Note over C: Merge candidates, select global top 10\n C->>S: Fetch selected documents\n S-->>C: Selected fields / source\n C-->>API: Ranked hits\n API-->>UI: JSON results\n```\nQuery phase mein shards local candidates nikaalte hain. Coordinator candidates merge karta hai; fetch phase mein selected documents ka content mangta hai. API final response frontend ko deti hai. Ye **scatter-gather** hai: kaam spread, phir results combine.\n\nDefault scoring shard-local term statistics use kar sakti hai; tiny uneven shards par scores surprising ho sakte hain. `dfs_query_then_fetch` extra statistics round-trip ka option hai, har query ka free improvement nahi.\n\nPartial shard failure par response ke `_shards.failed` aur timeout flags inspect karo. Incomplete results ko silently “saara catalogue” mat present karo. Neeche flow manual steps se dekho.",
+        "origin": "Supplementary explanation",
+        "animation": "search"
+      },
+      {
+        "title": "Write internals: buffer, translog, refresh",
+        "body": "Ek product save hona aur uska search mein dikhna alag milestones hain.\n\n1. Primary relevant operation process karta hai. Analyzer terms banata hai; Lucene indexing buffers/structures update hote hain.\n2. Operation translog mein record hoti hai; replicas par replication coordinate hoti hai. **Translog** recovery log hai: crash ke baad last Lucene commit se recent operations replay ho sakti hain.\n3. **Refresh** new segments/searcher ko expose karta hai, taaki search changes dekh sake. Ye Lucene durable commit ka synonym nahi.\n4. **Flush** Lucene commit aur new translog generation karta hai. Default request durability mein translog fsync acknowledgment se pehle relevant primary/allocated replicas par hota hai. Async durability mein crash-loss window ho sakti hai.\n\n```mermaid\nflowchart TD\n W[Index request] --> P[Primary and replica processing]\n P --> B[Lucene buffer and translog]\n B --> A[Acknowledgment under durability policy]\n B --> R[Refresh: searcher sees new segments]\n B --> F[Flush: Lucene commit, new translog generation]\n```\nOrdinary active Elastic Stack indices often 1s refresh interval use karte hain; serverless/defaults/configuration different ho sakti hai. Isko strict 1-second SLA mat samjho. `refresh=wait_for` next refresh visibility ka wait karwa sakta hai; har write par forced refresh throughput ko hurt karta hai. Real-time GET by ID aur `_search` ki visibility behavior alag ho sakti hai.\n\n[Elastic: refresh](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter) · [Translog durability](https://www.elastic.co/docs/reference/elasticsearch/index-settings/translog).",
+        "origin": "Supplementary explanation",
+        "lab": "visibility"
+      },
+      {
+        "title": "Segments, deletes aur doc values",
+        "body": "Lucene index multiple **segments** ka set hai. Segment ek searchable unit hai; existing segment ko har product update par rewrite nahi karte. New data new segments mein aata hai. Updates broadly old document ko delete-mark karke new version index karti hain.\n\n**Merge** background mein segments combine karta hai aur obsolete/deleted documents reclaim kar sakta hai. Isliye delete se disk turant utni free hona guaranteed nahi. Bahut tiny segments aur heavy updates disk I/O badha sakte hain. Active write-heavy index par frequent force-merge default remedy nahi.\n\nText search ke liye `term → document IDs` useful hai. Lekin `price` se sort ya brand counts ke liye documents ke field values chahiye. **Doc values** column-oriented on-disk representation hain jo many keyword/numeric/date fields par sorting aur aggregations support karti hai.\n\n`text` par fielddata enable karna memory expensive ho sakta hai. Brand aggregation ke liye `brand` ko keyword map karo. `_source` document ka stored representation hai, inverted index se alag. Har field searchable, stored aur aggregatable ek hi tareeke se nahi hoti.\n\n[Elastic: doc values](https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/doc-values).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Mapping: text vs keyword",
+        "body": "`name` ko words mein search karna hai; `brand` ko exact filter/group karna hai; `price` ko numeric compare karna hai. **Mapping** batati hai har field ka type aur indexing behavior.\n\n`text`: analysis ke baad tokens, full-text `match` ke liye. `keyword`: exact term (unless configured normalizer changes it), filters/sort/aggregations ke liye. `term` query input ko text analyzer se nahi guzarti; `text` field par raw `Samsung Galaxy` term bhejna usual full-text intent solve nahi karta.\n\nCreate index: `PUT /products-v1`\n```json\n{\n  \"settings\":{\"number_of_shards\":3,\"number_of_replicas\":1},\n  \"mappings\":{\"dynamic\":\"strict\",\"properties\":{\n    \"name\":{\"type\":\"text\",\"fields\":{\"raw\":{\"type\":\"keyword\"}}},\n    \"description\":{\"type\":\"text\"},\n    \"brand\":{\"type\":\"keyword\"},\n    \"price\":{\"type\":\"long\"},\n    \"in_stock\":{\"type\":\"boolean\"},\n    \"version\":{\"type\":\"long\"}\n  }}\n}\n```\nYe **illustrative cluster setting** hai, universal recommendation nahi. Single-node local cluster mein 1 replica unassigned rahegi. `price` yahan integer paise mein hai: ₹75,000 = 7,500,000 paise. Currency alag field se model karna multi-currency app mein zaroori hai.\n\n`dynamic: strict` unknown fields reject karta hai; controlled schema mein accidental mapping explosion se bachta hai. Existing field type badalne ke liye usually naya index aur reindex migration chahiye. [Elastic: mapping](https://www.elastic.co/docs/manage-data/data-store/mapping).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Query DSL: actual search request",
+        "body": "DSL matlab structured query language; yahan JSON request body. Name/description relevance mein help karein, brand/price eligibility control karein.\n\n`POST /products-v1/_search`\n```json\n{\n  \"size\":10,\n  \"_source\":[\"name\",\"brand\",\"price\",\"in_stock\"],\n  \"query\":{\"bool\":{\n    \"must\":[{\"multi_match\":{\n      \"query\":\"Samsung 5G Phone\",\n      \"fields\":[\"name^3\",\"description\"],\n      \"operator\":\"and\"\n    }}],\n    \"filter\":[\n      {\"term\":{\"brand\":\"Samsung\"}},\n      {\"range\":{\"price\":{\"lte\":8000000}}},\n      {\"term\":{\"in_stock\":true}}\n    ]\n  }},\n  \"aggs\":{\"brands\":{\"terms\":{\"field\":\"brand\",\"size\":10}}}\n}\n```\n`name^3` name field contribution boost karta hai; exact score 3× final score hoga ye guarantee nahi. `must` lexical matching/scoring karta hai; `filter` yes/no eligibility deta hai without relevance contribution. `lte` less-than-or-equal hai. Is request ka brands aggregation **already filtered** results par hoga; Samsung filter ke saath doosre brands ka sidebar expect mat karo.\n\n`multi_match` default best-fields mein AND per field apply hota hai; name mein Samsung aur description mein Phone hone se dono terms automatically cross-field satisfy nahi hote. Cross-field intent ho toh compatible analyzers ke saath `cross_fields`/`combined_fields` evaluate karo. [Elastic: multi-match](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-multi-match-query).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Search controls: gate, preference aur strict order",
+        "body": "Shopkeeper ke teen instructions suno:\n\n- “₹50,000 se neeche hi dikhao.” → **gate**, `filter`.\n- “Stock wale ko thoda prefer karo, sold-out bhi dikhaana.” → **preference**, `should`.\n- “Stock wale hamesha pehle, relevance baad mein.” → **strict order**, `sort`.\n\nInko ek rule samjhoge toh galat products disappear honge. Naye chat ke four products: S25 ₹45k (out of stock), Ultra ₹95k (in stock), A55 ₹35k (in stock), iPhone ₹75k. `Samsung Galaxy` + price < ₹50k se S25/A55; stock filter bhi lagaya toh sirf A55.\n\n| Bool clause | Simple job |\n|---|---|\n| must | Required lexical condition; query context mein score contribute kar sakti hai |\n| filter | Required yes/no condition; relevance score contribution nahi |\n| should | Optional scoring preference, jab required clauses already hon; minimum rules check karo |\n| must_not | Exclude karo; score contribution nahi |\n\n**Should ka trap:** bool mein sirf `should` hon toh default at least 1 required. `must`/`filter` present hon toh default 0. Intent optional stock bonus hai toh `minimum_should_match: 0` explicit rakh sakte ho. Filter context cache eligibility de sakta hai; har filter automatically cached hone ki guarantee nahi.\n\n```json\n{\n \"query\":{\"bool\":{\n  \"must\":[{\"multi_match\":{\"query\":\"Samsung Galaxy\",\"fields\":[\"name^3\",\"description\"],\"operator\":\"and\"}}],\n  \"filter\":[{\"range\":{\"price\":{\"lt\":5000000}}}],\n  \"should\":[{\"constant_score\":{\"filter\":{\"term\":{\"in_stock\":true}},\"boost\":2}}],\n  \"minimum_should_match\":0\n }}\n}\n```\nYahan main mapping ki `price` paise mein hai: ₹50k = 5,000,000 paise. `constant_score` eligible stock match ko fixed bonus deta hai, lexical stock relevance invent nahi karta. Should bonus **always-on-top guarantee nahi**. Hard stock-first ordering chahiye toh `sort: [{\"in_stock\":\"desc\"},{\"_score\":\"desc\"}]` add karo.\n\nField boost `name^3` name-match evidence ko importance deta hai. Final score universal exact 3× guarantee nahi, aur category meaning automatically samajh nahi aata. Neeche lab mein title weight, price gate aur stock rule badlo. Four source products ke saath ek added cover example rakha hai, taaki title-vs-description difference visible ho. **Modelled scores**, real ES scores nahi.\n\n[Elastic: bool defaults](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-bool-query) · [Sorting](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/sort-search-results).",
+        "origin": "Supplementary explanation",
+        "lab": "policy"
+      },
+      {
+        "title": "Fuzzy search: Samsng se Samsung",
+        "body": "Typo tolerance ka matlab har galat word ko magically samajhna nahi. **Edit distance** count karti hai ek word ko doosre mein badalne ke liye minimum edits.\n\n- `samsng → samsung`: `u` insert = 1 edit.\n- `lapto → laptop`: `p` insert = 1 edit.\n- `phone → phane`: ek substitution.\n- `smasung → samsung`: adjacent transposition; Elasticsearch fuzzy matching mein transpositions default allowed hain.\n\nClassic **Levenshtein distance** insert/delete/substitute handle karti hai. Adjacent swap ko single edit count karna related Damerau/optimal-string-alignment behavior hai; inko same definition mat bolo.\n\nConceptual dynamic programming: `D[i,j]` first i/j characters ka distance. Same character ho toh diagonal unchanged; warna `1 + min(delete, insert, substitute)`. Grid fill karke final cell answer deta hai. Production Lucene fuzzy matching indexed term dictionary par automata/term expansion use karti hai; har stored document ke against full DP grid banana uska normal plan nahi.\n\n```json\n{\"query\":{\"match\":{\"name\":{\n  \"query\":\"Samsng\",\"fuzziness\":\"AUTO\",\"prefix_length\":1,\"max_expansions\":25\n}}}}\n```\n`prefix_length:1` first character exact rakhta hai. `max_expansions` candidates cap karta hai; low cap recall reduce kar sakta hai. Fuzziness spelling ke nearby indexed terms find karti hai, synonyms/meaning nahi. `mobile` ko `phone` se match karna synonym ya semantic requirement hai. Har term par expensive fuzziness enable karna latency/noise badha sakta hai.\n\nNeeche small vocabulary par edit distance calculate karo. Ye teaching implementation hai, Lucene execution nahi. [Elastic: fuzzy query](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-fuzzy-query).\n\n### “Samsung” ka spelling guess kaise hua?\nTerm dictionary indexed terms ki vocabulary hai. Query `samsug` se engine allowed-edit constraints ke andar dictionary terms explore kar sakta hai. `samsung` candidate milta hai; uske baad uski posting list. Ye sentence meaning guess karne ka step nahi. Related Lucene automata candidate branches prune kar sakti hain; lab deliberately small DP distance dikhati hai, actual automaton implementation nahi.\n\nAUTO default length bands: 0–2 characters → 0 edits, 3–5 → 1, 6+ → 2. Prefix length early characters exact rakhkar candidate set reduce kar sakti hai. Correct word ke first character mein typo ho toh woh useful result bhi reject ho sakta hai. Source chat ke correction ke mutabik `samsug` query par Galaxy ko Charger se automatically better mat samjho—dono mein same Samsung term ho sakti hai. Product-specific preference ke liye actual query/fields/business signal chahiye.\n",
+        "origin": "Supplementary explanation",
+        "lab": "fuzzy",
+        "animation": "dictionary"
+      },
+      {
+        "title": "Autocomplete aur phrase search",
+        "body": "User `sam` type kare tab suggestion chahiye—ye typo correction se alag intent hai. **Autocomplete** incomplete input handle karta hai. Prefix-aware indexing/query strategy choose karo.\n\n`search_as_you_type` field subfields banata hai jo efficient prefix/infix style matching support karte hain. Simple separate example, pehle wale `products-v1` mapping ka part nahi:\n```json\n{\"mappings\":{\"properties\":{\"name\":{\"type\":\"search_as_you_type\"}}}}\n```\nIsko `PUT /products-suggest` par bhejo. Phir `POST /products-suggest/_search`:\n```json\n{\"query\":{\"multi_match\":{\n  \"query\":\"samsung ga\",\"type\":\"bool_prefix\",\n  \"fields\":[\"name\",\"name._2gram\",\"name._3gram\"]\n}}}\n```\nFrontend debounce (short typing pause), cancellation aur latest-request-only rendering se out-of-order response old suggestions nahi dikhayegi. Backend query limits, timeouts aur rate limits phir bhi chahiye. Suggestions mein unauthorized products leak nahi hone chahiye.\n\n`match_phrase` analyzed terms ki relative positions/order use karta hai. AND sirf presence check karta hai; `React Python` aur `Python React` dono AND satisfy kar sakte hain. Phrase aur prefix ko interchangeably use mat karo. [Elastic: search-as-you-type](https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/search-as-you-type).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Phrase detective: words paas hain ya sirf present?",
+        "body": "`Samsung Galaxy` bolne par tum naam ka sequence dhoondh rahe ho, sirf Samsung aur Galaxy ki attendance nahi.\n\n`match` with AND: dono terms same searched field mein hon. Position/order enforce nahi. `match_phrase`: analyzed positions ko phrase pattern se match karta hai. Default **slop 0**: zero positional movement budget.\n\n| Text | AND | Phrase, slop 0 | Minimum slop in this simple example |\n|---|---|---|---|\n| Samsung Galaxy charger | Match | Match | 0 |\n| Samsung new Galaxy | Match | No | 1 |\n| Samsung super fast Galaxy | Match | No | 2 |\n| Galaxy Samsung | Match | No | 2 |\n\nLast row important hai: **slop sirf extra words count nahi**. Reversed adjacent terms ko align karne ke liye 2 positional moves lagte hain. Real analyzers stop words/synonyms/positions change kar sakte hain; table simple contiguous lowercase tokens assume karti hai.\n\n```json\n{\"query\":{\"match_phrase\":{\"name\":{\"query\":\"Samsung Galaxy\",\"slop\":1}}}}\n```\nIs query mein `Samsung new Galaxy` eligible, reversed `Galaxy Samsung` nahi. Strict phrase mismatch ka matlab “kam score” nahi—phrase clause match hi nahi karti. Broader must-match ke saath separate phrase `should` use karoge toh phrase match bonus ho sakta hai.\n\n**Try this:** slop ko 0 → 1 → 2 karo. Word chips ki positions dekho aur predict karo kaunsi row next unlock hogi. Ye two-term position model hai, full Lucene phrase engine nahi. [Elastic: match phrase](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-match-query-phrase).",
+        "origin": "Supplementary explanation",
+        "lab": "phrase"
+      },
+      {
+        "title": "Search API aur live request example",
+        "body": "Backend ko Elasticsearch ka public proxy mat banao. API input validate kare, allowed filters choose kare, user permissions apply kare aur results ka stable shape return kare.\n\nExample contract: `GET /api/search?q=Samsung&limit=10`. `q` 1–200 trimmed characters, `limit` 1–50. Invalid input `400`; search unavailable aur safe fallback nahi toh bounded `503`. Price/stock checkout par primary DB se revalidate karo; search index stale ho sakta hai.\n\nNeeche modern Python client style ka **illustrative Flask route** hai. App mein live ES server bundled nahi. Setup mein matching Elasticsearch client version, `ES_URL`, API key aur `products-v1` with indexed products chahiye. Source ka Flask example yahan validation/error handling ke saath extend kiya hai.\n```python\nimport os\nfrom flask import Flask, request, jsonify\nfrom elasticsearch import Elasticsearch, ApiError\nfrom elastic_transport import ConnectionError, ConnectionTimeout\n\napp = Flask(__name__)\nes = Elasticsearch(os.environ['ES_URL'],\n    api_key=os.environ['ES_API_KEY'],\n    request_timeout=2, max_retries=0)\n\n@app.get('/api/search')\ndef search():\n    q = request.args.get('q', '').strip()\n    try:\n        limit = int(request.args.get('limit', '10'))\n    except ValueError:\n        return {'error': 'limit integer hona chahiye'}, 400\n    if not 1 <= len(q) <= 200 or not 1 <= limit <= 50:\n        return {'error': 'q 1–200 chars; limit 1–50'}, 400\n    try:\n        result = es.search(index='products-v1', size=limit,\n            query={'match': {'name': q}},\n            source=['name', 'brand', 'price'])\n    except (ApiError, ConnectionError, ConnectionTimeout):\n        return {'error': 'Search abhi available nahi hai'}, 503\n    if result.get('timed_out') or result['_shards']['failed']:\n        return {'error': 'Complete results available nahi hain'}, 503\n    return jsonify({'items': [\n        {'id': h['_id'], **h['_source']}\n        for h in result['hits']['hits']\n    ]})\n```\nError logging/metrics, authentication aur tenant filters production integration mein add karo. Lab ke browser calculations actual API benchmarking nahi hain.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Do kitchens: results aate hi dikhao",
+        "body": "Restaurant mein chai 1 minute mein aur sandwich 5 minute mein ready hota hai. Chai ko sandwich ka wait kyun karwaana? Same idea jab learning demo PostgreSQL aur Elasticsearch results compare karti hai.\n\n**Sequential:** PG finish, phir ES start. **Concurrent:** dono start together. **Streaming:** jo ready hua uska result client ko turant emit karo. Concurrent launch alone streaming nahi; `await Promise.allSettled(...)` ke baad dono emit karoge toh faster result bhi slower ka wait karega.\n\n```mermaid\nsequenceDiagram\n participant UI as Browser\n participant API as Streaming API\n participant PG as PostgreSQL\n participant ES as Elasticsearch\n UI->>API: Search request\n par Both start\n API->>PG: FTS query\n and\n API->>ES: Search DSL\n end\n ES-->>API: First result ready\n API-->>UI: Event: elasticsearch result\n PG-->>API: Second result ready or error\n API-->>UI: Event: postgres result/error\n API-->>UI: Event: done\n```\nDiagram mein ES first illustrative hai; PG bhi first finish kar sakta hai. Niche delays swap karke dekho.\n\n**SSE — Server-Sent Events:** server se browser tak event messages. Wire format mein `data:` aur blank-line separator chahiye:\n```text\nevent: source_result\ndata: {\"source\":\"elasticsearch\",\"status\":\"ok\",\"items\":[]}\n\n```\nRaw JSON lines ko `text/event-stream` bol dena valid SSE framing nahi. JSON Lines format chahiye toh NDJSON framing/content type choose karo aur streaming fetch reader se parse karo.\n\n```javascript\n// Conceptual server-side orchestration; sendSse adds proper framing.\nconst tasks = [\n  ['postgres', () => pgSearch(term)],\n  ['elasticsearch', () => esSearch(term)]\n];\nawait Promise.all(tasks.map(async ([source, search]) => {\n  try {\n    const items = await search();\n    sendSse('source_result', { source, status: 'ok', items });\n  } catch {\n    sendSse('source_result', { source, status: 'error' });\n  }\n}));\nsendSse('done', {});\n```\nErrors per task handled hain, isliye ek fail ho toh other result ship hota hai. Production mein per-source timeout, client disconnect cancellation, request ID, permission filters aur proxy buffering handle karo. Streaming start ke baad normal HTTP status replace nahi kar sakte; per-source errors event contract mein aati hain.\n\nCompare UI mein panels **source-labelled** rakho. Do rank scores directly compare ya lists concatenate karke “best” mat declare karo. Actual fallback sirf primary fail hone par query start kar sakti hai; har production search dono databases ko hit kare, ye requirement nahi. [MDN: SSE message framing](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events).",
+        "origin": "Supplementary explanation",
+        "lab": "streaming"
+      },
+      {
+        "title": "PostgreSQL se search tak: dual-write problem",
+        "body": "Source scenario: PostgreSQL mein Product 103 save hua. Agli Elasticsearch call fail ho gayi. Ab DB mein product hai, search mein nahi. Frontend refresh karne se missing indexing job khud create nahi hoti.\n\n```python\n# Fragile two-step write\nsave_product_and_commit(product)\nes.index(index='products', id=product.id, document=payload)\n```\nDo independent systems par separate writes **atomic transaction** nahi hain. Atomic ka matlab poora group successful ya poora rollback. Redis search cache yahan missing write repair nahi karta.\n\nReliable flow ke liye **transactional outbox**: same PostgreSQL transaction mein product row aur pending event save karo. Outbox alag magic server nahi, database table hai.\n```python\n# Conceptual SQLAlchemy models; transaction boundary important hai\nwith db.session.begin():\n    product = Product(name='Samsung S25', version=1)\n    db.session.add(product)\n    db.session.flush()  # ID milti hai; commit abhi nahi\n    db.session.add(Outbox(\n        event_id=event_id,\n        product_id=product.id,\n        event_type='PRODUCT_CREATED',\n        status='pending'\n    ))\n```\nDono inserts ke baad **ek commit**. Product commit aur outbox commit alag karoge toh beech ka crash event lose kar sakta hai. Successful commit ke baad Flask crash se committed outbox row normally lose nahi hoti, DB durability assumptions ke andar.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Outbox → queue → worker",
+        "body": "**Publisher** pending outbox events read karta hai, queue mein publish karta hai aur broker confirmation ke baad published mark karta hai. **Durable queue** pending work preserve karti hai, configured persistence/replication/confirm settings ke saath. **Worker** separate process hai jo indexing karta hai.\n\n```mermaid\nflowchart TD\n U[User creates product] --> API[Flask API]\n API --> TX[One PostgreSQL transaction]\n TX --> P[(Products table)]\n TX --> O[(Outbox table)]\n TX --> OK[201 Created after commit]\n O -. pending events .-> PUB[Outbox publisher]\n PUB --> Q[Durable queue]\n Q --> W[Background worker]\n W --> ES[Elasticsearch]\n ES --> ACK[ACK after successful handling]\n```\nProduct create request queue drain hone ka wait nahi karti. RabbitMQ down ho lekin product+outbox commit successful ho toh agreed async contract mein `201 Created` valid hai. Ye **immediate search visibility** promise nahi.\n\nQueue ko cache se confuse mat karo: cache frequently read data rakhta hai; queue work delivery track karti hai. Redis Pub/Sub alone durable indexing log nahi. Redis Streams persistence aur consumer recovery configuration ke saath option ho sakta hai.\n\nWorker aur Flask different processes mein hon toh independently scale/restart ho sakte hain. Same physical machine par alag processes machine-level isolation nahi dete. Publisher bhi separate process ho toh Flask restart ka wait nahi karna padta.\n\nYe eventual consistency hai: recovery aur successful processing ke baad projections catch up kar sakti hain. Permanent poison event ko ignore kar diya toh system automatically converge nahi karega.",
+        "origin": "Source conversation",
+        "animation": "indexing"
+      },
+      {
+        "title": "Duplicates, ACK aur event ordering",
+        "body": "**ACK — acknowledgment** queue ko batata hai ki processing complete hai. Worker ES mein index karke ACK se pehle crash ho sakta hai. Broker redelivery karega; duplicate delivery normal failure scenario hai.\n\nSource example: product ID `103` ko ES document `_id` banao. Same immutable content dobara index karne se second product nahi banta. Ye **idempotent effect** hai: repeated operation se same intended state.\n\nLekin same ID **ordering** solve nahi karti:\n\n| Time | Event | ES state without guard |\n|---|---|---|\n| 10:00 | A: version 1, S25 | — |\n| 10:01 | B: version 2, S25 Ultra | — |\n| 10:02 | B arrives first | S25 Ultra |\n| 10:03 | A arrives late | S25, stale! |\n\nPer-product monotonic version old update reject kar sakti hai. Source used `version_type='external_gte'`: version 2 ke baad 1 reject, equal 2 accepted. Equal versions ka **identical payload** ensure karna zaroori; same version ke different contents se overwrite phir bhi possible.\n```python\nes.index(index='products-v1', id='103',\n    document={'name': 'Samsung S25 Ultra', 'version': 2},\n    version=2, version_type='external_gte')\n```\nWorker ACK tab kare jab write successful ho ya verified newer version ki wajah se event obsolete ho. Har version conflict ko blindly ignore mat karo. Publisher confirmation ke baad outbox mark se pehle crash bhi duplicate publish kar sakta hai; exactly-once delivery ka claim mat karo.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Retries, DLQ aur recovery speed",
+        "body": "Source mein ES 10 minutes down, queue mein 10,000 messages aur 5 workers the. Recovery hote hi sab messages dump karoge toh ES phir overload ho sakta hai.\n\n**Exponential backoff:** waits `1s → 2s → 4s → 8s → 16s`, capped budget ke saath. **Jitter:** random variation, taaki workers ek saath retry storm na banayein.\n\n**Transient error** jaise timeout/overload retry ho sakta hai. Invalid field type baar-baar same payload bhejne se theek nahi hoti. **DLQ — Dead Letter Queue** failures investigate/replay karne ka separate destination hai. Alert, reason aur payload/version record karo. DLQ message move karna fix nahi.\n\n```mermaid\nflowchart TD\n Q[Queue] --> W[Worker]\n W --> D{Index outcome}\n D -->|Success or verified obsolete| A[ACK]\n D -->|Temporary failure| R[Bounded backoff with jitter]\n R --> Q\n D -->|Permanent error or exhausted budget| L[DLQ and alert]\n L --> F[Investigate and fix]\n F -->|Controlled replay| Q\n```\n**Backpressure** downstream capacity ke hisaab se intake/concurrency control karti hai. Source ki assumed capacity 2,000 events/min ho aur 10,000 backlog ho: no new arrivals par theoretical minimum 5 minutes. Agar incoming 1,500/min ho, spare rate 500/min; backlog drain roughly 20 minutes. Ye added arithmetic estimate hai, guarantee nahi. Bulk indexing, per-item errors aur varying cost se actual time change hoga.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Circuit breaker, fallback aur freshness",
+        "body": "Source ka **application circuit breaker** remote dependency ko protect karta hai:\n\n- **Closed:** normal calls.\n- **Open:** repeated failures ke baad calls temporarily block.\n- **Half-open:** limited probes; success par close, failure par open.\n\nYe Elasticsearch ke internal memory circuit breakers se alag concept hai. Har request se pehle health-check call karna expensive aur racy bhi hai: health pass ke baad actual request fail ho sakti hai. Timeouts aur observed failures handle karo.\n\nSearch outage mein recent cached popular results ya suitably indexed PostgreSQL FTS **bounded fallback** ho sakte hain. Cache hit hamesha possible nahi; DB par unlimited fallback se secondary outage ho sakti hai. Rate limits, concurrency budget aur clearly degraded response define karo.\n\n**Do freshness delays:** PostgreSQL commit → indexing worker tak delay; ES accepted write → refresh/search visibility delay. Refresh interval kam karna queue backlog fix nahi karta. Queue age, oldest outbox age, indexing errors aur refresh metrics separately observe karo.\n\nSource ka distinction yaad rakho: fallback availability improve karta hai; reliable outbox/indexing synchronization fix karti hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Bulk API aur backfill",
+        "body": "Millions of existing products ko one-by-one synchronous request se migrate karna slow ho sakta hai. **Bulk API** ek request mein multiple operations bhejti hai, lekin poora batch single atomic transaction nahi hota.\n\n`POST /_bulk` with `Content-Type: application/x-ndjson`. Har action aur document separate line; body ka last newline required:\n```text\n{\"index\":{\"_index\":\"products-v1\",\"_id\":\"103\"}}\n{\"name\":\"Samsung S25\",\"brand\":\"Samsung\",\"price\":7500000,\"in_stock\":true,\"version\":1}\n{\"index\":{\"_index\":\"products-v1\",\"_id\":\"104\"}}\n{\"name\":\"Pixel Phone\",\"brand\":\"Google\",\"price\":6000000,\"in_stock\":true,\"version\":1}\n```\nHTTP success ke saath kuch items fail ho sakte hain. `errors` aur har item status inspect karo; transient failed items retry, schema errors investigate/DLQ. Stable IDs aur version policy retries mein preserve karo. Batch size bytes aur latency se tune karo; giant batch memory aur retry cost badhata hai.\n\n**Backfill** existing rows ka initial import hai. Live writes ke saath safe migration ke liye change capture start point/snapshot plan define karo. Example: consistent snapshot + recorded change-log position, snapshot load, captured changes replay with versions, verify catch-up, then cutover. Simple “SELECT all then switch” concurrent updates lose kar sakta hai.\n\nBulk example static learning request hai; website khud external ES ko writes nahi bhejti. [Elastic: bulk API](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "CSV se index: SDK ka practical role",
+        "body": "SDK remote engine nahi. Python/TypeScript object ko JSON request mein bhejne aur response parse karne ki convenient library hai. REST API aur SDK **same backend search** se baat karte hain.\n\nMaan lo `reviews.csv` mein `id,review,sentiment` columns hain. Review text full-text hai; sentiment exact positive/negative tag. Explicit new mapping create karo; existing production index blindly delete mat karo:\n```json\n{\"mappings\":{\"dynamic\":\"strict\",\"properties\":{\n \"review\":{\"type\":\"text\"},\"sentiment\":{\"type\":\"keyword\"}\n}}}\n```\nBody ko `PUT /reviews-v1` par use karo. Credentials environment mein, server side par. Matching client/cluster major version choose karo.\n\n```python\nimport csv\nimport os\nfrom elasticsearch import Elasticsearch, helpers\n\nes = Elasticsearch(os.environ['ES_URL'],\n                   api_key=os.environ['ES_API_KEY'])\ndef actions(path):\n    with open(path, newline='', encoding='utf-8') as f:\n        for row in csv.DictReader(f):\n            if not row.get('id') or not row.get('review'):\n                continue  # real import: record rejected-row reason\n            yield {\n                '_index': 'reviews-v1', '_id': row['id'],\n                '_source': {'review': row['review'],\n                            'sentiment': row.get('sentiment', '')}\n            }\n\nfor ok, item in helpers.streaming_bulk(\n    es, actions('reviews.csv'), chunk_size=200,\n    max_retries=3, raise_on_error=False\n):\n    if not ok:\n        print('Investigate failed item:', item)\n```\nGenerator ek-ek action yield karta hai; poori CSV RAM mein load nahi. Stable `_id` same review ki replay par duplicate records avoid karti hai. `streaming_bulk` per-item outcomes inspect karne deta hai; helper ke retries all failure classes ko automatically fix nahi karte. Transport exceptions, per-item permanent failures aur rejected CSV rows ko importer ke failure report/retry workflow mein handle karo.\n\nTyping `gret product` par fuzzy query + sentiment filter same DSL se banegi. `must` text scoring; `filter` exact sentiment eligibility. SDK switch karne se query ka meaning change nahi hota. [Elastic: Python helpers](https://www.elastic.co/docs/reference/elasticsearch/clients/python/client-helpers).\n\nCode illustrative integration hai; website local CSV upload ya live ES writes nahi karti.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Reindex, aliases aur safe deletion",
+        "body": "**Alias** ek stable logical name hai, jaise `products-search`, jo physical index `products-v1` ko point karta hai. Mapping change ke liye `products-v2` build kar sakte ho, changes catch up karwa sakte ho, phir alias actions se old remove + new add atomically kar sakte ho. Data verification aur synchronization atomic alias switch se pehle chahiye.\n\n```mermaid\nflowchart LR\n A[Search API] --> L[products-search alias]\n L --> V1[products-v1 before cutover]\n L -. after verified switch .-> V2[products-v2]\n```\nOld index rollback window ke liye rakhna helpful ho sakta hai; writes continue hui toh rollback freshness bhi plan karo. Reindex API source copy karti hai, application ke future changes automatically mirror nahi karti.\n\n**Delete ordering:** version 3 deletion ke baad delayed version 2 create event product resurrect kar sakta hai. External version deletion metadata finite retention rakhti hai; usko infinite tombstone mat assume karo. Long event delay/replay ke liye application durable deletion marker/version ledger ya worker DB check strategy design karo. Search cache invalidation bhi alag needed ho sakti hai.\n\nSensitive permissions, checkout stock aur deleted products ke hard correctness checks primary authoritative source se karo. Search projection ke eventual consistency ko authorization guarantee mat banao. [Elastic: aliases](https://www.elastic.co/docs/manage-data/data-store/aliases).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Pagination, aggregations aur scale estimates",
+        "body": "`from=100000,size=10` ka matlab shards ko bahut candidates retain/merge karne pad sakte hain. Deep pagination ke liye **search_after** sorted cursor use karta hai. Stable view chahiye toh **PIT — Point In Time** ke saath consistent query/sort use karo. PIT ke saath implicit `_shard_doc` tiebreaker mil sakta hai; response ka returned `sort` array next request mein preserve karo. Expired PIT par cursor reset/restart behavior define karo.\n\nTerms aggregation brand counts ke liye useful hai; distributed top buckets approximation error rakh sakte hain. Exact financial reports ke liye blindly top-N aggregate ko ground truth mat banao.\n\nIllustrative sizing, source mein measured benchmark nahi:\n```text\n10,00,000 documents × assumed 2 KB raw JSON ≈ 2 GB raw\n1 replica → roughly double indexed copy storage\nBut indexed size ≠ raw size: analyzer, doc values, source,\nsegments, merges, replicas and disk headroom matter.\n10,000,000 searches/day ÷ 86,400 ≈ 116 average QPS\nAssumed 5× peak ≈ 580 QPS, benchmark required\n```\nRaw size se exact shard count ya node count nahi nikalta. Test with realistic query mix, refresh interval, updates, aggregations aur failure scenario. Observe p95/p99 latency, heap/GC, disk I/O, rejected requests, shard size aur indexing lag. [Elastic: pagination](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/paginate-search-results).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "ELK: search se logs tak",
+        "body": "**ELK**: Elasticsearch for indexing/search, Logstash for processing/routing events, Kibana for exploration/dashboards. Modern pipelines Elastic Agent/Beats ya other collectors bhi use kar sakti hain; har setup ko Logstash mandatory nahi.\n\n```mermaid\nflowchart TD\n A[Application structured logs] --> C[Collector or shipper]\n C --> L[Optional Logstash processing]\n L --> E[Elasticsearch logs data stream]\n E --> K[Kibana dashboards and queries]\n```\nExample: Flask log mein `timestamp`, `request_id`, `service`, `status`, `latency_ms` emit karo. Parsing pipeline field types normalize kare. `request_id` exact keyword, latency numeric, timestamp date ho. Phir “search API p95 slow kyun?” query kar sakte ho.\n\nCredentials, tokens aur personal data logs mein dump mat karo. Retention, rollover, access control aur storage budget define karo. Log search cluster aur product search workload compete karein toh isolation/capacity plan karo.\n\nYe source mein announced topic tha; complete explanation yahan supplementary hai. [Elastic: Elastic Stack](https://www.elastic.co/docs/get-started/the-stack).",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Common mistakes aur practice path",
+        "body": "1. **PostgreSQL always slow:** query/index fit check karo; EXPLAIN ANALYZE aur realistic benchmark use karo.\n2. **Search par index banta hai:** documents ingest hote waqt searchable structures maintain hote hain.\n3. **AND ranking hai:** AND eligibility hai; BM25 relevance order.\n4. **Short document always wins:** TF saturation, IDF aur normalization saath kaam karte hain.\n5. **Replica backup hai:** accidental deletes copies tak propagate hote hain; snapshots/rebuild separate hain.\n6. **201 means search ready:** DB commit, async indexing aur refresh different milestones.\n7. **Same ID solves every duplicate problem:** duplicate records avoid ho sakte hain; old updates ke liye version/order policy chahiye.\n8. **More workers/shards always faster:** bottleneck aur coordination cost measure karo.\n9. **Bulk 200 means all indexed:** per-item failures inspect karo.\n10. **DLQ solves event:** investigation, fix, replay aur alerting abhi bhi chahiye.\n\nPractice: pehle live matching lab mein `React Python` OR/AND compare karo. Phir `Samsung 5G Phone` ke liye minimum 2 try karo. BM25 mein repeats adjust karo. Fuzzy lab mein `samsng` aur `lapto` use karo. Visibility lab mein write ke baad refresh se pehle/baad compare karo. Finally bina notes dekhe outbox architecture draw karo aur ACK se pehle crash explain karo.\n\nInterview questions neeche basics se production scenarios tak arranged hain. Source ke checkpoints ko open-ended questions mein adapt kiya hai; naye advanced questions aur added reasoning separately labelled hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Inverted index candidates nikaalta hai; query eligibility aur BM25 ranking alag decisions hain.",
+      "PostgreSQL FTS + GIN bhi indexed search hai; Elasticsearch requirement ke basis par choose karo.",
+      "Har shard Lucene index hai; search ek copy per relevant shard group par hoti hai.",
+      "Refresh search visibility hai; translog/flush durability aur recovery ke alag mechanisms hain.",
+      "Product + outbox same transaction; async indexing ka delay API contract mein clear rakho.",
+      "Stable ID retries handle karti hai; version policy stale updates handle karti hai.",
+      "Bounded retries, jitter, DLQ aur backpressure ke bina recovery overload kar sakti hai.",
+      "Replicas backups nahi; mappings, sync lag, permissions aur failure response consciously design karo.",
+      "Filter eligibility hai; should preference hai; hard stock-first order ke liye sort chahiye.",
+      "Phrase slop positional movement budget hai; adjacent reversed terms ke liye 2 moves.",
+      "Concurrent queries aur emit-as-ready streaming alag decisions hain; SSE framing valid honi chahiye.",
+      "PostgreSQL ts_rank BM25 nahi; fair comparison mein semantics, returned fields aur limits comparable rakho."
+    ],
+    "related": [
+      "es-inverted-index",
+      "es-matching",
+      "es-bm25",
+      "es-postgres",
+      "es-gin",
+      "es-shards",
+      "es-visibility",
+      "es-sync",
+      "es-atomic-outbox",
+      "es-publisher-crash",
+      "es-worker-crash",
+      "es-ordering",
+      "es-workers",
+      "es-retry-dlq",
+      "es-backpressure",
+      "es-circuit",
+      "es-created",
+      "es-fuzzy",
+      "es-mapping",
+      "es-bulk",
+      "es-deep-page",
+      "es-rebuild",
+      "es-bool-stock",
+      "es-phrase-slop",
+      "es-stream-ready",
+      "es-benchmark"
+    ],
+    "sources": [
+      {
+        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+        "label": "your Full-Text Search & Elasticsearch conversation"
+      },
+      {
+        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+        "label": "your follow-up search conversation"
+      },
+      {
+        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
+        "label": "Backend from First Principles · Chapter 11"
+      }
+    ]
+  },
+  {
+    "id": "es-inverted-index",
+    "slug": "es-inverted-index",
+    "title": "10 lakh documents mein React bina sab documents scan kiye kaise milega?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "10 lakh documents mein React bina sab documents scan kiye kaise milega?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Book index jaisa term-to-document map banao. Source ke documents mein React IDs 1,3 aur Python IDs 2,3 mein tha. Ye indexing par maintain hota hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Elasticsearch ka Lucene layer per-field inverted index maintain karta hai. Query analysis ke baad terms ki posting lists se candidates retrieve hote hain. Original text ke full scan ki zarurat usual indexed term search mein nahi hoti.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "`react → [1,3]` lookup candidate IDs deta hai. Display fields fetch phase mein aate hain; matching aur full-document retrieval same step nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Frontend index create nahi karta. Follow-up: index cost? Extra storage, ingest CPU aur update/merge work. Frequent term ki long posting list phir bhi costly ho sakti hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Index pehle maintain hota hai.",
+      "Posting list candidates deti hai, final ranking nahi."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-matching",
+    "slug": "es-matching",
+    "title": "React Python mein AND lagega ya OR, aur minimum_should_match kya karega?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "React Python mein AND lagega ya OR, aur minimum_should_match kya karega?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Developer policy choose karta hai. Source mein typical match OR aur explicit AND compare hue the.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Lexical match query default OR use karti hai. AND sab analyzed query terms require karta hai. minimum_should_match se intermediate policy bana sakte hain; ye eligible results control karta hai, ranking nahi.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "React-only, Python-only aur React+Python documents: OR mein 3, AND mein sirf last. Samsung 5G Phone query with minimum 2 par Samsung Phone eligible.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "AND term order enforce nahi karta. Follow-up: phrase chahiye? match_phrase aur positions use karunga. Analyzer terms remove/change kare toh counts raw words se different ho sakte hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Policy developer configure karta hai.",
+      "Eligibility aur relevance separate."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-bm25",
+    "slug": "es-bm25",
+    "title": "BM25 mein rare term aur document length ka kya role hai?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "BM25 mein rare term aur document length ka kya role hai?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein Samsung 1 lakh documents mein aur 5G sirf 100 mein tha. Rare term generally stronger signal hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“BM25 TF saturation, IDF aur field-length normalization combine karta hai. Repeated term ko diminishing benefit milta hai, rare term ko generally more weight, aur length comparable conditions mein contribution adjust karti hai. Shortest document guaranteed winner nahi.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "React×4+Python aur React+Python compare karte waqt TF benefit vs longer-field penalty dono evaluate karunga. Corpus average aur parameters ke bina winner claim nahi karunga.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Follow-up: keyword count enough kyun nahi? Common vs rare terms aur repetition spam ka difference miss hota hai. Business importance ke liye boosts tune karunga, offline relevance examples se validate karunga.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "TF saturation + IDF + length normalization.",
+      "Score corpus/configuration par depend karta hai."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-postgres",
+    "slug": "es-postgres",
+    "title": "PostgreSQL mein index hai toh Elasticsearch kab choose karoge?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "PostgreSQL mein index hai toh Elasticsearch kab choose karoge?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source ka 50k-products example basic keyword search tha. Existing PostgreSQL FTS pehle sensible option ho sakta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Pehle search requirements aur existing DB capacity evaluate karunga. PostgreSQL GIN-based full-text search kaafi use cases solve karti hai. Rich relevance, autocomplete, fuzzy features, aggregations aur independent distributed search scaling ki need ho toh Elasticsearch ka operational aur sync cost justify ho sakta hai.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Normal B-tree se %Samsung% substring efficient range lookup nahi milti. FTS ke liye tsvector+GIN; substring ke liye pg_trgm index evaluate karunga.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "PostgreSQL always full table scan karta hai bolna incorrect. Follow-up: 1 million rows threshold? Fixed threshold nahi; representative load aur feature needs measure karunga.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Requirement pe decision, row-count rule nahi.",
+      "FTS aur substring indexes alag use cases."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-gin",
+    "slug": "es-gin",
+    "title": "Samsung% aur %Samsung% ke indexes mein kya difference hai?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Samsung% aur %Samsung% ke indexes mein kya difference hai?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Sorted dictionary mein Samsung se starting words contiguous ho sakte hain; anywhere Samsung ke liye single starting range nahi.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Prefix LIKE suitable B-tree operator class/collation se range lookup use kar sakta hai. Leading wildcard ordinary B-tree ke liye selective starting range remove karta hai. Word search ko tsvector GIN aur substring ko trigram strategy se evaluate karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Apple Samsung Compatible Charger sirf %Samsung% match karega. Plain FTS GIN index existing LIKE query ko automatically accelerate nahi karta.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Case-insensitive ILIKE ke liye plain name B-tree assume nahi karunga. lower(name) based query/index ya suitable trigram approach verify karunga; actual plan EXPLAIN se dekhunga.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Prefix ≠ contains ≠ word search.",
+      "Query expression aur index compatible hon."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-shards",
+    "slug": "es-shards",
+    "title": "Primary shards, replicas aur coordinating node kaise milkar search karte hain?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Primary shards, replicas aur coordinating node kaise milkar search karte hain?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein 10 lakh products, 3 primary shards aur per-shard Lucene indexes discuss hue.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Index partitioned primary shard groups mein hota hai. Query relevant groups mein ek primary ya replica copy par execute hoti hai. Coordinator local top candidates merge karke selected hits fetch karta hai. Replicas availability aur search-serving capacity improve kar sakti hain.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "3 primaries + 1 replica each = 6 shard copies. Search ko ordinarily 3 relevant groups cover karne hain, 6 duplicates nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "More shards always faster nahi: network/merge/metadata overhead badhta hai. Failover ke liye eligible copy aur functioning cluster coordination chahiye. Replica same primary ke saath same node par nahi.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Shard partition, replica copy.",
+      "One copy per relevant group per search."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-visibility",
+    "slug": "es-visibility",
+    "title": "Index request successful hai, phir bhi search mein product kyun nahi dikh raha?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Index request successful hai, phir bhi search mein product kyun nahi dikh raha?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein near real-time behavior discuss hua: indexed document immediately search-visible hona zaroori nahi.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Pehle check karunga event ES tak processed hua ya queue mein pending hai. ES write accepted ho chuki ho toh refresh visibility pending ho sakti hai. User flow ko read-after-write search visibility chahiye toh refresh=wait_for consider karunga; every write force-refresh nahi.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "10:00 DB commit, 10:02 worker index, next refresh par search visible. Refresh interval reduce karna 2-minute queue delay solve nahi karta.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Follow-up: translog refresh same? Nahi. Translog recovery/durability log hai, refresh searcher visibility, flush Lucene commit. App mein lab conceptual state dikhata hai, real timing nahi.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Queue lag aur refresh lag alag.",
+      "Write ACK ≠ immediate search visibility."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-sync",
+    "slug": "es-sync",
+    "title": "Product DB mein save hua, Elasticsearch down hai. Missing indexing kaise recover hogi?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Product DB mein save hua, Elasticsearch down hai. Missing indexing kaise recover hogi?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein fragile DB commit then ES call se product search mein miss ho raha tha.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Product aur indexing event same PostgreSQL transaction mein commit karunga. Outbox publisher confirmed durable queue publish karega; worker bounded retries ke saath ES projection update karega. Search cache outage fallback ho sakti hai, reliable delivery ka substitute nahi.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Product 103 aur event 501 commit hue. ES down rahe toh event pending/retry state mein retained hai. Recovery par successful indexing ke baad ACK.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Queue persistence, confirms aur recovery configure karne honge. Follow-up: CDC? Committed changes capture karna alternative hai, lekin initial snapshot, replay, duplicates aur schema evolution phir bhi design karne padte hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Outbox missed dual-write window close karti hai.",
+      "Recovery mechanisms configure karne hain."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-atomic-outbox",
+    "slug": "es-atomic-outbox",
+    "title": "Product commit aur outbox commit ke beech crash ho toh?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Product commit aur outbox commit ke beech crash ho toh?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source ne exactly ye two-commit failure poocha tha. Product save ho sakta hai aur event absent reh sakta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Dono inserts ek hi DB transaction mein karunga. Successful commit par product aur event dono durable honge under DB settings; error par dono rollback. Outbox insert ke liye separate commit nahi karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "BEGIN → INSERT product → INSERT outbox → COMMIT. flush ID generate kar sakta hai, commit nahi. Flask crash after commit par separate publisher pending row process kar sakta hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Atomic outbox queue+DB distributed transaction nahi banati. Publish and mark-published gap mein duplicates possible hain, isliye consumer idempotent chahiye.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "One transaction, one commit.",
+      "Atomic DB writes ≠ exactly-once delivery."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-publisher-crash",
+    "slug": "es-publisher-crash",
+    "title": "Publisher publish karne ke baad published mark se pehle crash kare toh?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Publisher publish karne ke baad published mark se pehle crash kare toh?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein broker mein message aa gaya lekin outbox abhi pending thi. Restart par publish repeat ho sakta hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Confirmation ke baad mark-published karunga, lekin crash gap acknowledge karunga. Delivery at-least-once assume karke stable event/product IDs aur safe consumer effects design karunga. Mark-before-publish se silent message loss risk hai.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Event 501 queue mein hai. Publisher crash hua. Restart par event 501 again publish hua; consumer same product version ko safely handles.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Multiple publishers ke liye row claiming/locking aur retry lease chahiye. Confirmation ka durability meaning actual broker configuration par depend karta hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Duplicates possible and expected.",
+      "Consumer effects idempotent banao."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-worker-crash",
+    "slug": "es-worker-crash",
+    "title": "Worker index karke ACK se pehle crash kare toh duplicate product banega?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Worker index karke ACK se pehle crash kare toh duplicate product banega?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein queue unacknowledged message ko doosre worker ko redeliver karti hai. Broker ES success khud nahi jaan sakta.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“ACK successful effect ke baad karunga. Crash gap par redelivery possible hai. Same product ID aur same immutable payload se index retry existing document replace karti hai, duplicate record create nahi. Out-of-order updates ke liye version guard alag hoga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Worker 1 product _id 103 index karta hai, crashes. Worker 2 same event version 2 processes; _id 103 hi remains. Random generated ID har retry par use karoge toh duplicates ban sakte hain.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "RabbitMQ redelivery, SQS visibility timeout aur Streams pending-entry reclaim alag mechanisms hain. Same machine par separate worker process machine failure isolate nahi karta.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "ACK after handling.",
+      "Stable ID and version policy together."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-ordering",
+    "slug": "es-ordering",
+    "title": "Version 2 ke baad version 1 event aaya. Same ID enough hai?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Version 2 ke baad version 1 event aaya. Same ID enough hai?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein S25 Ultra ko older S25 event overwrite kar raha tha. Stable ID duplicates stop karti hai, stale state nahi.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Per-product monotonic version transactional update ke saath generate karunga. ES external version policy older events reject karegi. Equal-version retry accept karun toh payload immutable ensure karunga. Conflict cause inspect karke obsolete event ko ACK karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "v2 Ultra applied. v1 S25 arrives: reject under external version guard. external_gte v2 again accept karta hai; different content with same v2 unsafe hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Follow-up deletion: late create resurrect kar sakta hai if durable tombstone/version knowledge lost. Deletion state aur long replay window explicitly plan karunga.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "ID uniqueness and update ordering alag.",
+      "Equal version must mean same state."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-workers",
+    "slug": "es-workers",
+    "title": "5 workers hon toh ek event sabko milega? More workers always faster?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "5 workers hon toh ek event sabko milega? More workers always faster?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein competing consumers queue workload distribute karte hain, broadcast nahi. Redelivery failure par ho sakti hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Normal competing-consumer delivery mein ek task ek worker handle karta hai. More workers concurrency badhate hain jab downstream capacity available ho. ES bottleneck ho toh worker count cap, batching aur backpressure use karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "1 worker assumed 100/min. 5 ideally 500/min, lekin ES 2,000/min cap ho toh 100 workers ka 10,000/min offered load overload karega.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Per-product ordering concurrent workers se break ho sakti hai. Partitioned ordering/version guard chahiye. Queue fanout subscriptions ko competing consumers ke saath confuse nahi karunga.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Consumers share work, failures redeliver.",
+      "Scale to bottleneck capacity."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-retry-dlq",
+    "slug": "es-retry-dlq",
+    "title": "Invalid data aur temporary Elasticsearch outage ko same retry doge?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Invalid data aur temporary Elasticsearch outage ko same retry doge?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source ne permanent Product 103 error ko DLQ aur outages ko backoff se handle kiya.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Temporary timeouts/overload par bounded exponential backoff with jitter. Invalid mapping/data ko unchanged infinite retry nahi; DLQ with error context, alert aur controlled replay. Successful indexing ke baad hi ACK.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Retry delays 1,2,4,8,16 seconds plus jitter; total budget capped. Invalid price string ko fix karke replay karo. DLQ mein move karke bhoolna recovery nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Failure routing/ACK broker-specific reliability se implement karunga taaki DLQ transfer gap mein loss na ho. Unknown timeout outcome par idempotency retry safe banati hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Classify transient vs permanent.",
+      "DLQ needs investigation and replay."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-backpressure",
+    "slug": "es-backpressure",
+    "title": "10,000 queued events hain. Recovery par sab turant bhejoge?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "10,000 queued events hain. Recovery par sab turant bhejoge?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source ka correct choice controlled rate tha, taaki recovered ES dobara overload na ho.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Queue drain ko measured ES capacity ke andar rakhunga. Worker concurrency, bounded bulk size aur backoff tune karunga. Queue age aur live latency monitor karke gradually ramp up; incoming traffic bhi capacity consume karegi.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Assume 2,000 events/min and no incoming: theoretical 5 min. Incoming 1,500/min toh net 500/min, roughly 20 min. Actual varying costs/errors se longer ho sakta hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Backlog count alone misleading hai: oldest event age freshness dikhati hai. More workers bounded capacity ke aage useful nahi.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Use spare throughput for drain estimate.",
+      "Recovery needs rate control."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-circuit",
+    "slug": "es-circuit",
+    "title": "Circuit breaker open hai. Recovery kaise check karoge?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Circuit breaker open hai. Recovery kaise check karoge?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source mein Half-open state limited test requests allow karti hai. Direct sab traffic resume karna risky hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Application circuit breaker failures par open hoga. Cooldown ke baad bounded half-open probes allow karunga. Probes successful toh gradual normal flow; failure toh reopen. Timeouts aur fallback budgets saath define karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "5-minute outage ke baad ek controlled probe passes. Sab workers ek saath 10k backlog blast na karein; backpressure independent rehti hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Application dependency breaker aur ES internal memory breakers alag concepts hain. Har request se pehle health endpoint call racy hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Half-open probes recovery test karti hain.",
+      "Breaker retries/backpressure replace nahi karta."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-created",
+    "slug": "es-created",
+    "title": "RabbitMQ down hai, product aur outbox committed hain. API 201 ya 500?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "RabbitMQ down hai, product aur outbox committed hain. API 201 ya 500?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Source answer 201 Created tha, async contract ke under. Search later update ho sakti hai.",
+        "origin": "Source conversation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Agar agreed success DB product creation aur durable indexing intent hai, commit ke baad 201 return karunga. Queue outage outbox publisher retry karega. Search-ready status separately expose kar sakta hoon; indefinite request wait nahi.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "User product detail GET DB se dekh sakta hai. Search lag indicator ya pending indexing state communicate kar sakte hain. Queue down par outbox retention/disk aur alerts important hain.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Agar product contract immediate searchable creation demand karta hai toh success semantics revisit karni hongi. Commit failed ho toh 201 galat.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Success contract clear rakho.",
+      "201 does not imply search ready."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-fuzzy",
+    "slug": "es-fuzzy",
+    "title": "Samsng ko Samsung kaise match karoge, aur cost kya hai?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Advanced",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Samsng ko Samsung kaise match karoge, aur cost kya hai?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Ye source mein next topic announced tha; detailed question aur answer yahan added hain. Typo nearby spelling hai, synonym nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Analyzed text par match with bounded fuzziness evaluate karunga. Lucene nearby indexed terms expand karke posting lists search kar sakta hai. prefix_length/max_expansions se cost/recall trade-off control, aur measured latency/relevance se tune karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "samsng→samsung one insert, lapto→laptop one insert. mobile→phone spelling distance se meaningful synonym solution nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Adjacent transpositions supported when enabled; classic Levenshtein definition se difference explain karunga. Huge fuzziness and every keystroke request expensive/noisy ho sakti hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Edit distance ≠ semantic similarity.",
+      "Expansion limits trade recall for cost."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-mapping",
+    "slug": "es-mapping",
+    "title": "Brand filter keyword par aur product name text par kyun?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Advanced",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Brand filter keyword par aur product name text par kyun?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "User brand exactly select karta hai, lekin title ke words search karta hai. Different access patterns require different field types.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Name text with analyzer full-text search ke liye map karunga. Brand keyword exact filtering/aggregation ke liye. Numeric price range ke liye numeric type. term query raw indexed term dekhti hai, match input analyze karta hai.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "brand Samsung term filter exact value match karta hai. Name Samsung Galaxy tokenize hota hai; term query on name with full raw phrase usual intent miss kar sakti hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Text field par aggregation ke liye fielddata blindly enable nahi. Keyword/doc-values use karo; dynamic uncontrolled fields mapping explosion kar sakte hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Map by access pattern.",
+      "match analyzes; term exact indexed term."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-bulk",
+    "slug": "es-bulk",
+    "title": "Bulk request HTTP success hai, phir bhi documents missing kyun?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Advanced",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Bulk request HTTP success hai, phir bhi documents missing kyun?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Ek truck delivery mein kuch parcels fail ho sakte hain; bulk request transport success whole operation success nahi.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Bulk response errors flag aur per-item outcomes inspect karunga. Only transient failed items retry, stable IDs/version preserve, permanent schema failures DLQ. Batch size bytes aur processing latency ke hisaab se cap karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "100 items mein 97 success, 2 overload, 1 invalid field. 2 retry, 1 fix/investigate. Saare 100 blindly regenerate IDs se retry unsafe hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Bulk atomic transaction nahi. Newline-delimited JSON expected hai, ordinary JSON array nahi. Per-request success ko indexing completeness proof mat banao.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Inspect every item outcome.",
+      "Bulk reduces overhead, not failure complexity."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-deep-page",
+    "slug": "es-deep-page",
+    "title": "1 lakh offset wali pagination slow kyun, alternative kya?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Advanced",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "1 lakh offset wali pagination slow kyun, alternative kya?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Offset skip karne ke liye shard candidate collection aur coordinator merge ka work badhta hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“Deep browsing ke liye search_after with stable sort aur point-in-time use karunga. Next request last hit ka returned sort array preserve karegi; PIT lifecycle/expiry handle karunga. Random page jump same contract nahi hota.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "Page 1 response sort values next page cursor hain. Data changing ho toh PIT consistent view deta hai, provided query and sorting unchanged rahein.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "PIT resources consume karta hai; short keep-alive and close use karo. from/size ko unlimited allow karna cost risk hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Cursor avoids large offset collection.",
+      "PIT + consistent sorting for stable view."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-rebuild",
+    "slug": "es-rebuild",
+    "title": "Mapping badalni hai bina search downtime ke. Kya plan hoga?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+      "label": "your Full-Text Search & Elasticsearch conversation"
+    },
+    "difficulty": "Advanced",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Mapping badalni hai bina search downtime ke. Kya plan hoga?",
+    "sections": [
+      {
+        "title": "Pehle intuition",
+        "body": "Physical index replace ho sakta hai; API stable alias ko use kar sakti hai. Actual sync migration hard part hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Interview mein aise bolo",
+        "body": "“New mapping ke saath v2 index banaunga, consistent snapshot/backfill aur concurrent changes replay karunga. Counts, sample queries, lag aur errors verify karke alias atomically v1 se v2 switch karunga. Rollback freshness/write routing plan define karunga.”",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Concrete example",
+        "body": "products-search alias v1 ko point karta hai. v2 complete aur caught up hone ke baad same aliases operation old remove/new add karta hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Follow-up aur common trap",
+        "body": "Atomic alias switch incomplete backfill fix nahi karta. Replica backup nahi; accidental deletion ke liye snapshots/rebuild available hon.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Catch-up before cutover.",
+      "Alias switch atomic, migration pipeline separate."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-bool-stock",
+    "slug": "es-bool-stock",
+    "title": "Sold-out products bhi dikhane hain, stock wale pehle. Filter ya should?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+      "label": "your follow-up search conversation"
+    },
+    "sources": [
+      {
+        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+        "label": "your Full-Text Search & Elasticsearch conversation"
+      },
+      {
+        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+        "label": "your follow-up search conversation"
+      },
+      {
+        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
+        "label": "Backend from First Principles · Chapter 11"
+      }
+    ],
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Sold-out products bhi dikhane hain, stock wale pehle. Filter ya should?",
+    "sections": [
+      {
+        "title": "Interview mein aise bolo",
+        "body": "Filter sold-out ko remove karega. Should optional score bonus de sakta hai. “Always stock first” contract ke liye in_stock descending, then score sorting chahiye. Must/filter present hone par should default optional hoti hai; should-only bool mein at least one default required hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Example se samjho",
+        "body": "S25 ₹45k sold-out aur A55 ₹35k in stock: price gate dono allow kare, stock filter sirf A55, stock preference dono show kare.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Common trap",
+        "body": "Constant-score stock bonus aur hard sort ko interchangeable mat bolo.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Constant-score stock bonus aur hard sort ko interchangeable mat bolo."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-phrase-slop",
+    "slug": "es-phrase-slop",
+    "title": "Samsung new Galaxy aur Galaxy Samsung ko phrase query kab match karegi?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+      "label": "your follow-up search conversation"
+    },
+    "sources": [
+      {
+        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+        "label": "your Full-Text Search & Elasticsearch conversation"
+      },
+      {
+        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+        "label": "your follow-up search conversation"
+      },
+      {
+        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
+        "label": "Backend from First Principles · Chapter 11"
+      }
+    ],
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Samsung new Galaxy aur Galaxy Samsung ko phrase query kab match karegi?",
+    "sections": [
+      {
+        "title": "Interview mein aise bolo",
+        "body": "Simple token positions ke saath slop 0 adjacent same-order terms match karega. One intervening token needs 1; adjacent reversed terms need 2 moves. Match AND word presence enforce karta hai, phrase order/proximity.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Example se samjho",
+        "body": "Samsung super fast Galaxy needs 2; Galaxy Samsung also needs 2, for a different reason.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Common trap",
+        "body": "Slop ko universal extra-word count mat samjho. Analyzer position gaps/synonyms interpretation change kar sakte hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Slop ko universal extra-word count mat samjho. Analyzer position gaps/synonyms interpretation change kar sakte hain."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-stream-ready",
+    "slug": "es-stream-ready",
+    "title": "Do queries parallel start ki hain. Kya fast result automatically turant dikhega?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+      "label": "your follow-up search conversation"
+    },
+    "sources": [
+      {
+        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+        "label": "your Full-Text Search & Elasticsearch conversation"
+      },
+      {
+        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+        "label": "your follow-up search conversation"
+      },
+      {
+        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
+        "label": "Backend from First Principles · Chapter 11"
+      }
+    ],
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "Do queries parallel start ki hain. Kya fast result automatically turant dikhega?",
+    "sections": [
+      {
+        "title": "Interview mein aise bolo",
+        "body": "Nahi. Dono start karna concurrency hai; per-source settle par client ko emit karna streaming hai. AllSettled ke baad output bhejne se fast result slow source ka wait karega. Per-source errors isolate karo aur request cancellation/timeouts define karo.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Example se samjho",
+        "body": "ES 400ms aur PG 1800ms assumed delays: emit-as-ready mein ES panel 400ms par aa sakta hai; all-at-end first result 1800ms ke baad.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Common trap",
+        "body": "Raw JSON lines valid SSE nahi: data: lines + blank event separator use karo, ya properly declared NDJSON.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Raw JSON lines valid SSE nahi: data: lines + blank event separator use karo, ya properly declared NDJSON."
+    ],
+    "related": []
+  },
+  {
+    "id": "es-benchmark",
+    "slug": "es-benchmark",
+    "title": "ILIKE se ES 6x fast mila. Kya architecture decision ho gaya?",
+    "topic": "Elasticsearch",
+    "category": "Core Systems",
+    "source": {
+      "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+      "label": "your follow-up search conversation"
+    },
+    "sources": [
+      {
+        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+        "label": "your Full-Text Search & Elasticsearch conversation"
+      },
+      {
+        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+        "label": "your follow-up search conversation"
+      },
+      {
+        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
+        "label": "Backend from First Principles · Chapter 11"
+      }
+    ],
+    "difficulty": "Intermediate",
+    "type": "Interview",
+    "tags": [
+      "Elasticsearch",
+      "Interview"
+    ],
+    "description": "ILIKE se ES 6x fast mila. Kya architecture decision ho gaya?",
+    "sections": [
+      {
+        "title": "Interview mein aise bolo",
+        "body": "Ek environment ka observation general guarantee nahi. Substring vs FTS semantics, LIMIT, fields, network, cache, index configuration aur concurrency compare karo. PostgreSQL FTS + GIN ko baseline mein include karo.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Example se samjho",
+        "body": "ILIKE returning all matches vs ES top 10 fair test nahi. Comparable payload and repeated percentile measurements chahiye.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Common trap",
+        "body": "PostgreSQL ts_rank ko BM25 mat call karo; built-in ranking functions different hain.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "PostgreSQL ts_rank ko BM25 mat call karo; built-in ranking functions different hain."
+    ],
+    "related": []
+  }
+]

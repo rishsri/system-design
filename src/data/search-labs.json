@@ -1,0 +1,107 @@
+{
+  "documents": [
+    {
+      "id": 1,
+      "text": "React is fast"
+    },
+    {
+      "id": 2,
+      "text": "Python is powerful"
+    },
+    {
+      "id": 3,
+      "text": "React and Python are popular"
+    },
+    {
+      "id": 4,
+      "text": "Samsung 5G Phone"
+    },
+    {
+      "id": 5,
+      "text": "Samsung Phone"
+    },
+    {
+      "id": 6,
+      "text": "5G Phone"
+    },
+    {
+      "id": 7,
+      "text": "Samsung TV"
+    }
+  ],
+  "presets": [
+    "React Python",
+    "Samsung 5G Phone"
+  ],
+  "vocabulary": [
+    "samsung",
+    "laptop",
+    "phone",
+    "galaxy",
+    "react",
+    "python"
+  ],
+  "titles": {
+    "matching": "Same query. Alag matching policy.",
+    "ranking": "Repetition aur length ka score par effect",
+    "fuzzy": "Typo badlo, edit distance dekho",
+    "visibility": "Write accepted ≠ search visible",
+    "policy": "Shopkeeper ke rules badlo. Results dekho.",
+    "phrase": "Words ki positions dekho. Slop badlo.",
+    "streaming": "Chai ready hai. Sandwich ka wait karoge?"
+  },
+  "products": [
+    {
+      "id": "s25",
+      "name": "Samsung Galaxy S25",
+      "description": "Fast phone with camera",
+      "price": 45000,
+      "in_stock": false
+    },
+    {
+      "id": "ultra",
+      "name": "Samsung Galaxy S25 Ultra",
+      "description": "Premium camera phone",
+      "price": 95000,
+      "in_stock": true
+    },
+    {
+      "id": "a55",
+      "name": "Samsung Galaxy A55",
+      "description": "Budget phone",
+      "price": 35000,
+      "in_stock": true
+    },
+    {
+      "id": "iphone",
+      "name": "Apple iPhone 17",
+      "description": "Phone with camera",
+      "price": 75000,
+      "in_stock": true
+    },
+    {
+      "id": "cover",
+      "name": "Travel case",
+      "description": "Samsung Galaxy cover",
+      "price": 1500,
+      "in_stock": true
+    }
+  ],
+  "phrases": [
+    "Samsung Galaxy charger",
+    "Samsung new Galaxy",
+    "Samsung super fast Galaxy",
+    "Galaxy Samsung",
+    "Samsung charger"
+  ],
+  "streamResults": {
+    "postgres": [
+      "Product 103 · Samsung Galaxy S25",
+      "Product 105 · Samsung Galaxy A55"
+    ],
+    "elasticsearch": [
+      "Product 105 · Samsung Galaxy A55",
+      "Product 103 · Samsung Galaxy S25"
+    ]
+  }
+}
