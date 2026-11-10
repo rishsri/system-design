@@ -1,8 +1,131 @@
 [
   {
+    "id": "core-system-design-foundations",
+    "slug": "core-system-design-foundations",
+    "title": "System Design Foundations: HLD, LLD & Capacity Estimation",
+    "topic": "System Design Foundations",
+    "category": "Core Systems",
+    "difficulty": "Beginner",
+    "type": "System design",
+    "tags": [
+      "HLD",
+      "LLD",
+      "Capacity Estimation",
+      "Request Flow",
+      "Scaling"
+    ],
+    "description": "System design ka basic map: HLD aur LLD ka farq, request ka safar, scaling aur ek worked capacity estimate.",
+    "sections": [
+      {
+        "title": "System design ka matlab kya hai?",
+        "origin": "Your content",
+        "body": "Maan lo photo-sharing app banani hai. Users photos upload karenge aur doosron ki photos dekhenge. System design mein hum decide karte hain ki is feature ko chalane ke liye kaunse parts chahiye, data kahan rahega, request kaise chalegi aur load ya failure aane par system kaise behave karega.\n\nPehle ek chhota version socho: app server photo request leta hai, metadata database mein rakhta hai aur image file storage mein. Traffic aur requirements badhein toh design bhi evolve hoga. Har system ko shuru se giant architecture ki zaroorat nahi."
+      },
+      {
+        "title": "HLD aur LLD mein kya farq hai?",
+        "origin": "Your content",
+        "body": "Building ka blueprint socho. Blueprint mein rooms aur unke beech ka raasta dikhte hain; wiring ka har connection nahi. System mein ye **High Level Design (HLD)** hai: major components, data flow, storage choice, expected load aur failure ke important paths.\n\n**Low Level Design (LLD)** uske baad code ke andar ka plan hai: classes ya modules ki zimmedari, unke beech interactions, methods aur data structures. Photo upload ke HLD mein `API → image storage + metadata database` ho sakta hai. LLD mein `PhotoUploadService`, `PhotoRepository` aur unke method contracts decide karoge.\n\nDono connected hain: HLD batata hai system ke parts kya karenge; LLD batata hai un parts ka code kaise organize hoga."
+      },
+      {
+        "title": "Browser se server tak request kaise jaati hai?",
+        "origin": "Your content",
+        "animation": "request-basics",
+        "body": "Jab browser `example.com` kholta hai, pehle DNS (Domain Name System) us naam ka IP address dhoondhne mein help karta hai. IP address batata hai request internet par kis server tak pahunchni hai.\n\nPhir browser us IP ke HTTPS port `443` par connection karke request bhejta hai. Port server machine par network service tak traffic pahunchane mein help karta hai. Web application request process karke response wapas bhejti hai.\n\nAgla flow request ko step-by-step dikhata hai."
+      },
+      {
+        "title": "Latency aur throughput alag cheezein hain",
+        "origin": "Your content",
+        "body": "Highway par ek gaadi ko end tak pahunchne mein kitna waqt laga, ye **latency** jaisa hai. Ek second mein kitni gaadiyan guzri, ye **throughput** jaisa hai.\n\nSoftware mein latency ek request ka response time hota hai, jaise `200 ms`. Throughput batata hai ek second mein kitni requests handle hui, jaise `5,000 requests/second`. System ka throughput badh sakta hai aur phir bhi individual requests slow ho sakti hain—dono ko alag measure karte hain.\n\nSearch page par user ko jaldi result chahiye toh latency important hai. Bulk photo processing mein total kaam kitni der mein khatam hoga, throughput bhi important ho sakta hai."
+      },
+      {
+        "title": "Load badhe toh system kaise scale hota hai?",
+        "origin": "Your content",
+        "body": "**Vertical scaling:** ek machine ko zyada CPU, RAM ya faster storage dena. Shuru mein operationally simple ho sakta hai, lekin machine ki capacity aur cost ki limit hoti hai.\n\n**Horizontal scaling:** aur machines add karke requests unmein baantna. Aksar load balancer traffic distribute karta hai. App servers ko is tarah design karna pad sakta hai ki koi bhi server request sambhale; shared session ya local file par nirbhar code ko pehle address karna hota hai.\n\nTraffic din bhar ek jaisa nahi hota. **Auto scaling** metrics aur rules ke basis par capacity add/remove kar sakta hai. Naye servers ready hone mein waqt lagta hai, isliye sudden spike ke liye headroom aur behavior pehle se sochna padta hai. Sirf `CPU 80%` jaise ek fixed rule har service ke liye sahi nahi hota."
+      },
+      {
+        "title": "Pehle numbers samjho: Rough Capacity Estimation",
+        "origin": "Your content",
+        "body": "Interview mein exact future predict karna goal nahi. Rough math se pata chalta hai ki design mein storage, read traffic ya write traffic mein se kis par pehle dhyaan dena hoga.\n\nMaan lo photo app ke **50 million daily active users** hain. Har user din mein **2 photos upload** aur **100 photos view** karta hai. Har photo ka average size **3 MB** maan rahe hain. Ek din mein `24 × 60 × 60 = 86,400 seconds`.\n\n```text\nUploads/day = 50,000,000 × 2\n            = 100,000,000 photos/day\n\nViews/day   = 50,000,000 × 100\n            = 5,000,000,000 views/day\n\nAverage upload rate = 100,000,000 / 86,400\n                    ≈ 1,157 uploads/second\nAverage view rate   = 5,000,000,000 / 86,400\n                    ≈ 57,870 views/second\n\nRaw image storage/day = 100,000,000 × 3 MB\n                      = 300,000,000 MB\n                      ≈ 300 TB/day (decimal units)\n\nRaw image storage/year = 300 TB × 365\n                        ≈ 109,500 TB\n                        ≈ 109.5 PB/year\n```\n\nYahan views uploads se `50×` zyada hain. Ye average rates hain, peak nahi; busy waqt traffic kai guna ho sakta hai. Aur 57,870 photo views ka matlab utni hi database reads zaroori nahi—CDN frequently requested images serve kar sakta hai. Agar har 10 photos mein ek par **ek comment** maan lo, toh `100M × 10% = 10M comments/day`; comment ke bytes diye nahi gaye, isliye uska storage abhi estimate nahi kar sakte.\n\nIs estimate se raw images ke liye object storage aur delivery ke liye CDN consider karna sensible lagta hai; database mein metadata rakh sakte hain. Lekin numbers akela ye prove nahi karte ki “ek server nahi chalega” ya kitne servers chahiye. Peaks, compression, retention, cache hit rate aur load test ke results bhi chahiye."
+      },
+      {
+        "title": "HLD aur LLD practice kahan se shuru karein?",
+        "origin": "Supplementary explanation",
+        "body": "Ek chhota feature lo—jaise photo upload. Pehle user ka flow aur requirements likho. HLD mein request path, metadata aur photo ke storage roles, expected load aur failure ke important cases draw karo. Phir LLD mein us flow ke modules, responsibilities aur method inputs/outputs decide karo.\n\nInterview mein har box ko technology se bharne ki jaldi nahi. Pehle batao box ki zaroorat kyun hai; phir estimate ya requirement aane par design ko agle step tak le jao."
+      }
+    ],
+    "takeaways": [
+      "HLD components aur unke beech data flow dikhata hai; LLD code ke andar responsibilities aur interactions.",
+      "Latency ek request ka time hai; throughput requests per second.",
+      "Vertical scaling ek machine badi karta hai; horizontal scaling machines add karta hai.",
+      "Capacity estimates assumptions aur averages hote hain; peak, caching aur retention alag check karo.",
+      "Image bytes ke liye object storage/CDN consider karo; metadata aur checkout rules ka source alag ho sakta hai."
+    ],
+    "related": []
+  },
+  {
+    "id": "core-load-balancers-in-depth",
+    "slug": "core-load-balancers-in-depth",
+    "title": "Load Balancers, In Depth",
+    "topic": "Load Balancers",
+    "category": "Core Systems",
+    "difficulty": "Beginner",
+    "type": "System design",
+    "tags": [
+      "Load Balancing",
+      "Round Robin",
+      "Least Connections",
+      "IP Hashing"
+    ],
+    "description": "Once you have multiple servers, something needs to decide which server handles each incoming request.",
+    "sections": [
+      {
+        "title": "Load Balancers, In Depth",
+        "origin": "Your content",
+        "verbatim": true,
+        "body": "Once you have multiple servers, something needs to decide which server handles each incoming request. That is the load balancer's job, and it sits right in front of your fleet of servers.\n\nThere are several common strategies a load balancer can use."
+      },
+      {
+        "title": "Round Robin",
+        "origin": "Your content",
+        "verbatim": true,
+        "body": "Round robin sends requests to servers one after another in a repeating cycle, server one, then server two, then server three, then back to server one.\n```text\nservers = [server1, server2, server3]\ncurrentIndex = 0\n\nfunction getNextServer():\n    server = servers[currentIndex]\n    currentIndex = (currentIndex + 1) % length(servers)\n    return server\n```"
+      },
+      {
+        "title": "Least Connections",
+        "origin": "Your content",
+        "verbatim": true,
+        "body": "Least connections sends each new request to whichever server currently has the fewest active connections. This works better than round robin when some requests take much longer to process than others, since it avoids piling more work onto a server that is already busy with long running requests.\n```text\nservers = [server1, server2, server3]\nactiveConnections = { server1: 4, server2: 1, server3: 7 }\n\nfunction getNextServer():\n    return server with minimum value in activeConnections\n\n    // after routing a request to that server:\n    activeConnections[chosenServer] += 1\n\n    // once that request finishes:\n    activeConnections[chosenServer] -= 1\n```"
+      },
+      {
+        "title": "IP Hashing",
+        "origin": "Your content",
+        "verbatim": true,
+        "body": "IP hashing generates a value based on the client's IP address and consistently sends that client to the same server every time. This matters for cases where a server temporarily holds information specific to that user's session, and you need their requests to keep landing on the same machine."
+      },
+      {
+        "title": "A traffic spike example",
+        "origin": "Your content",
+        "verbatim": true,
+        "body": "A concrete example, if a food delivery platform suddenly gets a huge traffic spike because of a big promotional sale, the load balancer is what prevents that spike from overwhelming any single server. Instead of one server trying to handle everything and crashing, the load balancer spreads the incoming rush across dozens of servers running in parallel, keeping the app responsive for everyone."
+      },
+      {
+        "title": "Amazon's Elastic Load Balancer",
+        "origin": "Your content",
+        "verbatim": true,
+        "body": "Real world example: Amazon's Elastic Load Balancer sits in front of thousands of backend servers during events like Black Friday, distributing incoming shopping traffic so that no single server handling checkout requests gets overwhelmed while others sit idle."
+      }
+    ],
+    "takeaways": [
+      "Round robin sends requests to servers one after another in a repeating cycle, server one, then server two, then server three, then back to server one.",
+      "Least connections sends each new request to whichever server currently has the fewest active connections.",
+      "IP hashing generates a value based on the client's IP address and consistently sends that client to the same server every time."
+    ],
+    "related": []
+  },
+  {
     "id": "core-elasticsearch",
     "slug": "core-elasticsearch",
-    "title": "Elasticsearch: search ko andar se samjho",
+    "title": "Elasticsearch: kya hai aur kaise kaam karta hai?",
     "topic": "Elasticsearch",
     "category": "Core Systems",
     "source": {
@@ -19,13 +142,98 @@
       "PostgreSQL",
       "Queues"
     ],
-    "description": "Ek phone shop ki search banao: words, ranking, budget aur stock rules ko khud change karke samjho. Phir shards, reliable indexing aur interview practice.",
+    "description": "Search engine ki need se shuru, phir words se results milne tak ka simple flow. Examples aur diagrams ke saath.",
     "sections": [
       {
-        "title": "Pehle picture samjho",
-        "body": "Aaj tum ek small phone shop ki search bana rahe ho. Customer `Samsng Galaxy` type karta hai. Owner ki demand: “Spelling galat ho tab bhi products milne chahiye. Budget follow karo. Sold-out ko hide ya neeche karne ka option do.”\n\nYahi story follow karke har mechanism samjhenge. **Pehle predict karo, phir control badlo, phir explanation padho.** Koi forced quiz nahi; examples tumhari pace par chalenge.\n\n### Chhote rounds mein padho\n1. [Word se result tak](#section-1)\n2. [Query ko tune karo](#section-18)\n3. [Phrase aur typo pakdo](#section-21)\n4. [System ke boxes samjho](#section-11)\n5. [Do sources ko race karao](#section-23)\n\nTechnical detail chahiye toh full chapter neeche hai. First pass mein saare formulas aur code ek saath yaad karne ki zaroorat nahi. Each lab ke paas uska reason aur limitation diya hai.\n\nIs lesson mein tumhare dono shared chats, Chapter 11 ki coverage aur separately labelled additional explanations use hue hain. Naye visuals browser simulations hain; real infrastructure ya measured benchmark nahi.",
+        "title": "Elasticsearch hota kya hai?",
+        "body": "Maan lo shopping app mein `Samsung phone` search kiya. Tumhe sirf woh products nahi chahiye jinke naam mein ye exact sentence likha ho. `Samsung Galaxy Phone` bhi milna chahiye, aur useful results pehle aane chahiye.\n\n**Elasticsearch ek search engine hai.** Hum ismein products jaise data ki searchable copy rakhte hain. Ye words ke basis par matching records dhoondhta hai aur unhe relevance ke hisaab se order kar sakta hai. Relevance ka matlab: is query ke liye kaunsa result zyada useful match hai.\n\nIska use sirf shopping mein nahi hota. Articles dhoondhne aur application logs search karne mein bhi hota hai. Filhaal products ka example kaafi hai.",
         "origin": "Supplementary explanation"
       },
+      {
+        "title": "Database hai, toh iski need kyun?",
+        "body": "Products toh PostgreSQL mein pehle se hain. Wahan bhi search ho sakti hai. Chhoti app mein simple query, aur zaroorat par PostgreSQL ka full-text search, kaafi ho sakta hai.\n\nAb search ki demands badhti hain: words alag order mein hon tab bhi match mile, spelling thodi galat ho tab bhi result aaye, title ke match ko description se zyada importance mile. Elasticsearch aise search features ko ek dedicated system mein handle karne ka option deta hai.\n\n**Har app ko Elasticsearch nahi chahiye.** Iske saath ek aur system chalana aur database se uski copy update rakhna padta hai. Jab search ki requirements us extra work ko justify karein, tab use karna sensible hai.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Data kahan rahega?",
+        "body": "Ek common design mein PostgreSQL original product record rakhta hai. Elasticsearch uski search ke kaam aane wali copy rakhta hai, jaise title, description aur price.\n\n```mermaid\nflowchart TD\n  DB[(PostgreSQL: original products)] -->|Background updates| ES[(Elasticsearch: searchable copy)]\n  U[User searches Samsung] --> API[Backend API]\n  API -->|Search query| ES\n  ES -->|Matching products| API\n  API -->|Results| U\n```\n\nUser ki request backend ko aati hai. Backend Elasticsearch se results leta hai aur response bhejta hai. Background updates ka matlab: product change hone ke baad uski search copy bhi update hoti hai; ye step fail ya delay ho sakta hai.\n\nIsliye search mein dikh raha stock final guarantee nahi hai. Checkout par current stock aur price original system se validate honge.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Har product padhe bina match kaise milta hai?",
+        "body": "Book ke last mein index dekha hoga: ek word ke saamne uske page numbers hote hain. Puri book padhne ki jagah seedha relevant pages mil jaate hain.\n\nElasticsearch mein bhi isi idea ka **inverted index** hota hai: word se un documents ki list milti hai jahan woh word present hai. Document matlab ek searchable record, jaise ek product.\n\n| ID | Product title |\n|---|---|\n| 1 | Samsung Galaxy Phone |\n| 2 | Samsung Charger |\n| 3 | Apple Phone |\n\nSimplified index:\n```text\nsamsung → [1, 2]\ngalaxy  → [1]\nphone   → [1, 3]\ncharger → [2]\n```\n\n`samsung` search par IDs 1 aur 2 milti hain. Ye word-to-document lists data add karte waqt banti hain; har search par shuru se nahi banti.\n\nText ko words mein todne aur lowercase jaise rules lagane wale process ko **analysis** kehte hain. Is process ko analyzer chalata hai. Exact rules uski configuration par depend karte hain.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Match milna aur pehle aana alag baatein hain",
+        "body": "`Samsung Phone` search mein dono words compulsory rakhein, toh example mein product 1 milega. Kisi ek word ka match allow karein, toh products 1, 2 aur 3 eligible ho sakte hain. Ye **matching rule** hai.\n\nAb eligible results ko kis order mein dikhayein? Ye **ranking** hai. Elasticsearch text search mein commonly BM25 naam ka scoring method use karta hai. Basic idea: query ka word document mein kitna useful signal hai? Bahut common word ka signal kam ho sakta hai; kam documents mein aane wala word zyada useful ho sakta hai. Word ki frequency aur field ki length bhi matter karti hain.\n\nSirf short title hone se result hamesha first nahi aata. Agar product 1 first chahiye kyunki title mein dono words hain, toh query aur field importance us goal ke hisaab se set karni hogi.\n\nBudget alag rule hai: ₹30,000 se kam chahiye toh usse mehenga product filter se bahar hoga, chahe text match kitna bhi achha ho. Stock ko compulsory rakhna aur stock wale ko thodi preference dena bhi alag decisions hain.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Spelling galat ho toh?",
+        "body": "Customer ne `Samsng` likha, jabki product mein `Samsung` hai. Dono mein ek `u` ka difference hai.\n\n**Fuzzy search** limited spelling differences ke saath indexed words match kar sakti hai. Is example mein ek missing letter allow karne par `Samsung` candidate ban sakta hai. Phir us word ke matching products milte hain.\n\nYe har typo ko samajhne ya user ka intent jaan lene ki guarantee nahi hai. Zyada differences allow karne se unrelated matches aur search ka work badh sakta hai. Autocomplete bhi alag need hai: user abhi `Sam` type kar raha ho toh suggestions dena.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Ek search ka poora flow",
+        "body": "Ab `Samsung Phone`, budget ₹30,000 aur in-stock only wali request lete hain.\n\n1. Backend query aur filters validate karta hai.\n2. Elasticsearch query ke words analyze karke index se matching products dhoondhta hai.\n3. Budget aur stock filters se ineligible products hat jaate hain.\n4. Bache hue products ke scores aur requested sort ke basis par top results milte hain.\n5. Backend ye results user ko bhejta hai.\n\nYe logical flow hai; engine andar work ko optimise kar sakta hai.\n\nData bada ho toh index ko **shards**, yaani chhote partitions, mein baanta ja sakta hai. Search relevant shards se results lekar merge karti hai. **Replica** shard ki extra copy hoti hai; suitable placement aur cluster coordination ke saath node failure handle karne mein help karti hai.\n\nShard aur replica samajhna next step hai. Basic idea wahi rehta hai: words se candidates, rules se eligible products, ranking se unka order.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Product update hua, search mein purana kyun hai?",
+        "body": "Maan lo phone ka price ₹32,000 se ₹29,000 hua. Database update ho gaya, lekin Elasticsearch ki copy abhi purani hai. Search kuch der tak purana price dikha sakti hai.\n\nDo delays ho sakte hain: update search system tak pahunchna, aur indexed change ka search ke liye visible hona. Elasticsearch mein naye indexed changes search ko visible karne wale step ko **refresh** kehte hain.\n\nReliable design update ka record safely rakhta hai, background worker se indexing karwata hai aur temporary failure par retry karta hai. Sirf “database update hua, ab Elasticsearch ko call kar denge” mein crash ke kaaran update miss ho sakta hai.\n\nYahi iska practical trade-off hai: better search features milte hain, lekin searchable copy ki freshness aur failure handling bhi manage karni hoti hai.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Elasticsearch ek search engine hai; har app ko iski zaroorat nahi.",
+      "Inverted index words ko matching documents se jodta hai.",
+      "Matching eligibility decide karti hai; ranking unka order. Budget jaise filters alag rules hain.",
+      "Database aur search copy alag hon toh update delay aur retry handle karne padte hain."
+    ],
+    "related": [
+      "es-inverted-index",
+      "es-matching",
+      "es-bm25",
+      "es-postgres",
+      "es-gin",
+      "es-shards",
+      "es-visibility",
+      "es-sync",
+      "es-atomic-outbox",
+      "es-publisher-crash",
+      "es-worker-crash",
+      "es-ordering",
+      "es-workers",
+      "es-retry-dlq",
+      "es-backpressure",
+      "es-circuit",
+      "es-created",
+      "es-fuzzy",
+      "es-mapping",
+      "es-bulk",
+      "es-deep-page",
+      "es-rebuild",
+      "es-bool-stock",
+      "es-phrase-slop",
+      "es-stream-ready",
+      "es-benchmark"
+    ],
+    "sources": [
+      {
+        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
+        "label": "your Full-Text Search & Elasticsearch conversation"
+      },
+      {
+        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
+        "label": "your follow-up search conversation"
+      },
+      {
+        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
+        "label": "Backend from First Principles · Chapter 11"
+      }
+    ],
+    "deepDive": [
       {
         "title": "Inverted index: word se document tak",
         "body": "Book ke last pages wala index socho: “Caching → pages 12, 48”. Har page padhne ki jagah seedha relevant pages par jaate ho. Inverted index bhi **term → matching document references** rakhta hai.\n\n| ID | Document |\n|---|---|\n| 1 | React is fast |\n| 2 | Python is powerful |\n| 3 | React and Python are popular |\n\nSimplified lowercase mapping:\n```text\nreact  → [1, 3]\npython → [2, 3]\nfast   → [1]\n```\n`react` lookup se candidates 1 aur 3 milte hain. Ye mapping **indexing ke waqt** banti hai; har search par dobara nahi banti. React frontend ye index nahi banata. Elasticsearch server ke andar Lucene searchable structures maintain karta hai.\n\nList ko **posting list** bolte hain: ek term kaunse documents mein present hai. Actual Lucene structure simple JavaScript object nahi: compressed document IDs, term frequency, aur configured text fields ke liye positions jaise details ho sakte hain. Positions phrase search mein kaam aati hain.\n\nIndex ka cost bhi hai: extra disk, indexing CPU aur updates. Har query constant-time nahi hoti; common term ke bahut candidates ho sakte hain. Benefit ye hai ki text ke liye har original document scan karna zaroori nahi.",
@@ -206,62 +414,6 @@
         "title": "Common mistakes aur practice path",
         "body": "1. **PostgreSQL always slow:** query/index fit check karo; EXPLAIN ANALYZE aur realistic benchmark use karo.\n2. **Search par index banta hai:** documents ingest hote waqt searchable structures maintain hote hain.\n3. **AND ranking hai:** AND eligibility hai; BM25 relevance order.\n4. **Short document always wins:** TF saturation, IDF aur normalization saath kaam karte hain.\n5. **Replica backup hai:** accidental deletes copies tak propagate hote hain; snapshots/rebuild separate hain.\n6. **201 means search ready:** DB commit, async indexing aur refresh different milestones.\n7. **Same ID solves every duplicate problem:** duplicate records avoid ho sakte hain; old updates ke liye version/order policy chahiye.\n8. **More workers/shards always faster:** bottleneck aur coordination cost measure karo.\n9. **Bulk 200 means all indexed:** per-item failures inspect karo.\n10. **DLQ solves event:** investigation, fix, replay aur alerting abhi bhi chahiye.\n\nPractice: pehle live matching lab mein `React Python` OR/AND compare karo. Phir `Samsung 5G Phone` ke liye minimum 2 try karo. BM25 mein repeats adjust karo. Fuzzy lab mein `samsng` aur `lapto` use karo. Visibility lab mein write ke baad refresh se pehle/baad compare karo. Finally bina notes dekhe outbox architecture draw karo aur ACK se pehle crash explain karo.\n\nInterview questions neeche basics se production scenarios tak arranged hain. Source ke checkpoints ko open-ended questions mein adapt kiya hai; naye advanced questions aur added reasoning separately labelled hain.",
         "origin": "Supplementary explanation"
-      }
-    ],
-    "takeaways": [
-      "Inverted index candidates nikaalta hai; query eligibility aur BM25 ranking alag decisions hain.",
-      "PostgreSQL FTS + GIN bhi indexed search hai; Elasticsearch requirement ke basis par choose karo.",
-      "Har shard Lucene index hai; search ek copy per relevant shard group par hoti hai.",
-      "Refresh search visibility hai; translog/flush durability aur recovery ke alag mechanisms hain.",
-      "Product + outbox same transaction; async indexing ka delay API contract mein clear rakho.",
-      "Stable ID retries handle karti hai; version policy stale updates handle karti hai.",
-      "Bounded retries, jitter, DLQ aur backpressure ke bina recovery overload kar sakti hai.",
-      "Replicas backups nahi; mappings, sync lag, permissions aur failure response consciously design karo.",
-      "Filter eligibility hai; should preference hai; hard stock-first order ke liye sort chahiye.",
-      "Phrase slop positional movement budget hai; adjacent reversed terms ke liye 2 moves.",
-      "Concurrent queries aur emit-as-ready streaming alag decisions hain; SSE framing valid honi chahiye.",
-      "PostgreSQL ts_rank BM25 nahi; fair comparison mein semantics, returned fields aur limits comparable rakho."
-    ],
-    "related": [
-      "es-inverted-index",
-      "es-matching",
-      "es-bm25",
-      "es-postgres",
-      "es-gin",
-      "es-shards",
-      "es-visibility",
-      "es-sync",
-      "es-atomic-outbox",
-      "es-publisher-crash",
-      "es-worker-crash",
-      "es-ordering",
-      "es-workers",
-      "es-retry-dlq",
-      "es-backpressure",
-      "es-circuit",
-      "es-created",
-      "es-fuzzy",
-      "es-mapping",
-      "es-bulk",
-      "es-deep-page",
-      "es-rebuild",
-      "es-bool-stock",
-      "es-phrase-slop",
-      "es-stream-ready",
-      "es-benchmark"
-    ],
-    "sources": [
-      {
-        "url": "https://chatgpt.com/share/6ad70635-2710-83e8-99a6-405c6aa20363",
-        "label": "your Full-Text Search & Elasticsearch conversation"
-      },
-      {
-        "url": "https://chatgpt.com/share/6ad70e50-4d28-83ee-92ae-9039a808e184",
-        "label": "your follow-up search conversation"
-      },
-      {
-        "url": "https://backend-from-first-principle.vercel.app/11-full-text-search-elasticsearch/#a-full-text-search-query",
-        "label": "Backend from First Principles · Chapter 11"
       }
     ]
   },

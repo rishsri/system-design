@@ -383,5 +383,52 @@
         "note": "No semantic brand preference invented"
       }
     ]
+  },
+  "request-basics": {
+    "title": "Browser ka request server tak kaise pahunchta hai?",
+    "nodes": [
+      "Browser",
+      "DNS resolver",
+      "Server IP:443",
+      "Application"
+    ],
+    "steps": [
+      {
+        "title": "1. Browser address leta hai",
+        "body": "User `example.com` kholta hai. Browser ko pehle iska network address chahiye.",
+        "active": [
+          0
+        ],
+        "note": "Hostname: example.com"
+      },
+      {
+        "title": "2. DNS IP dhoondhta hai",
+        "body": "Browser DNS resolver se poochhta hai. Resolver hostname ke liye IP return karta hai.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "example.com → server IP"
+      },
+      {
+        "title": "3. HTTPS request connect hoti hai",
+        "body": "Browser resolved IP ke port 443 par HTTPS request bhejta hai. Port us machine par sahi network service tak traffic pahunchata hai.",
+        "active": [
+          0,
+          2
+        ],
+        "note": "HTTPS · destination port 443"
+      },
+      {
+        "title": "4. App response wapas bhejti hai",
+        "body": "Server application request process karke HTTP response browser ko lautati hai. Ye ek request-response round trip hai.",
+        "active": [
+          2,
+          3,
+          0
+        ],
+        "note": "Request → app → response"
+      }
+    ]
   }
 }

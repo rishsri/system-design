@@ -22,7 +22,7 @@ Agents should start with [AGENTS.md](AGENTS.md), then read [the system design wr
 
 ## Core Systems: Elasticsearch
 
-The library has separate System Design / Core Systems navigation, with the existing searchable reading layout. `/question/core-elasticsearch` contains 35 detailed Hinglish sections, 11 Mermaid diagrams, 26 interview questions, 4 search motion walkthroughs, and 7 browser simulations. The original URL-shortener URLs remain unchanged.
+The library has separate System Design / Core Systems navigation, with the existing searchable reading layout. Core Systems begins with `/question/core-system-design-foundations` (HLD, LLD and a worked capacity estimate), then `/question/core-load-balancers-in-depth` (the supplied explanation and code kept verbatim), followed by `/question/core-elasticsearch`, which starts with 8 short fundamentals sections. The 34 detailed topics, 7 browser simulations and advanced walkthroughs are in optional, individually expandable deep dives; 26 interview answers remain expandable below. The original URL-shortener URLs remain unchanged.
 
 - `src/data/core-systems.json`: chapter, interview questions, source metadata, revision notes, and section-level origins.
 - `src/data/search-labs.json`: matching example documents, presets, vocabulary, and lab titles.
@@ -35,4 +35,4 @@ The source extraction and coverage boundary are recorded in [the Elasticsearch s
 
 The interactive examples calculate locally and do not connect to an Elasticsearch cluster. API/SQL examples are learning material; a Flask server, PostgreSQL, broker, workers, and Elasticsearch are not bundled. The visibility lab models conceptual milestones, not actual recovery/timing internals.
 
-The opening reading route links to five short concept rounds. New labs let readers vary price/stock/field boost, inspect word positions and phrase slop, and compare sequential, concurrent-wait-all, and emit-as-ready delivery. Streaming uses cancellable browser timers and example results, not database requests.
+The main explanation starts with what Elasticsearch is and why it may be needed. Optional `deepDive` sections use the same Section schema and load their diagrams/labs only when opened. New labs let readers vary price/stock/field boost, inspect word positions and phrase slop, and compare sequential, concurrent-wait-all, and emit-as-ready delivery. Streaming uses cancellable browser timers and example results, not database requests.
