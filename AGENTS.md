@@ -1,4 +1,4 @@
-# Agent instructions for Forma
+# Agent instructions for Engineering at Scale
 
 These instructions apply to this repository. Follow the current user's instructions when they change or override this guidance.
 
@@ -14,7 +14,7 @@ Do not skip the writing guide because a task looks like a small content edit. Fo
 
 ## Current product direction
 
-Forma is a simple, reading-first system design learning app:
+Engineering at Scale is a simple, reading-first system design learning app:
 
 - A straightforward system list and searchable library.
 - A detail page with a left table of contents, readable content, architecture diagrams, then interview questions and revision notes.

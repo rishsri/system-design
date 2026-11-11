@@ -106,20 +106,18 @@ svg {
 .brand {
   display: flex;
   align-items: center;
-  gap: 18px;
-  font-size: 23px;
-  letter-spacing: -1px;
+  gap: 13px;
+  font-size: 18px;
+  letter-spacing: -0.5px;
   font-weight: 750;
 }
 
-.brand > span {
-  font-weight: 400;
-  color: var(--line);
-  font-size: 24px;
+.brand-name {
+  white-space: nowrap;
 }
 
 .brand small {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 400;
   letter-spacing: 0;
@@ -771,11 +769,14 @@ h1 span {
     padding: 0 20px;
   }
   .brand {
-    font-size: 21px;
-    gap: 12px;
+    gap: 8px;
+  }
+  .brand-name {
+    font-size: 15px;
+    letter-spacing: -0.35px;
   }
   .brand small {
-    font-size: 11px;
+    font-size: 9px;
   }
   .page-shell {
     display: block;

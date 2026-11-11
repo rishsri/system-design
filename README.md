@@ -1,4 +1,4 @@
-# Forma — simple system design reader
+# Engineering at Scale — system design learning reader
 
 React + TypeScript + Vite. Run `npm install` and `npm run dev`. Build with `npm run build`.
 
