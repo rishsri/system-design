@@ -430,5 +430,255 @@
         "note": "Request → app → response"
       }
     ]
+  },
+  "cache-miss": {
+    "title": "Cache miss aaya—ab data kahan se milega?",
+    "nodes": [
+      "App",
+      "Redis",
+      "Database"
+    ],
+    "steps": [
+      {
+        "title": "1. Redis mein key check karo",
+        "body": "App photo:42 ki cached copy maangti hai. Key na mile toh request abhi bhi valid ho sakti hai.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "GET photo:42"
+      },
+      {
+        "title": "2. Miss par database padho",
+        "body": "App source of truth se photo laati hai. Cache miss ko database ka not-found result mat samjho.",
+        "active": [
+          0,
+          2
+        ],
+        "note": "Cache MISS → database read"
+      },
+      {
+        "title": "3. Copy rakh kar response do",
+        "body": "Photo milne par app Redis mein TTL ke saath copy rakhti hai, phir caller ko response deti hai.",
+        "active": [
+          0,
+          1,
+          2
+        ],
+        "note": "SET photo:42 · TTL 3600 sec"
+      }
+    ]
+  },
+  "cdn-edge": {
+    "title": "CDN edge par hit aur miss",
+    "nodes": [
+      "Browser",
+      "Nearest edge",
+      "Origin server"
+    ],
+    "steps": [
+      {
+        "title": "1. Browser nearby edge tak aata hai",
+        "body": "CDN request ko user ke paas wale edge location par route karta hai.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "GET /game-update.bin"
+      },
+      {
+        "title": "2. Cache miss par origin se lo",
+        "body": "Edge ke paas copy nahi hai, toh woh origin se content fetch karta hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "MISS → origin fetch"
+      },
+      {
+        "title": "3. Agli request edge se",
+        "body": "Policy allow kare toh edge copy save karta hai. Agli request par origin ko dobara hit nahi karna padta.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "HIT → edge response"
+      }
+    ]
+  },
+  "queue-processing": {
+    "title": "Upload ke baad background job",
+    "nodes": [
+      "API",
+      "Durable queue",
+      "Worker",
+      "Side effect"
+    ],
+    "steps": [
+      {
+        "title": "1. API job queue ko bhejti hai",
+        "body": "Video upload accept hone ke baad thumbnail banane ka kaam queue mein rakha jaata hai.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "Job 742 accepted"
+      },
+      {
+        "title": "2. User ko response milta hai",
+        "body": "Queue job ko sambhalti hai, isliye API worker ke poora hone ka wait kiye bina response bhej sakti hai.",
+        "active": [
+          0,
+          1,
+          2
+        ],
+        "note": "HTTP response → upload accepted"
+      },
+      {
+        "title": "3. Worker process karke ACK deta hai",
+        "body": "Worker task complete karta hai aur queue ko acknowledge karta hai. Crash ho toh redelivery ho sakti hai.",
+        "active": [
+          1,
+          2,
+          3
+        ],
+        "note": "Retry-safe, idempotent work"
+      }
+    ]
+  },
+  "cap-partition": {
+    "title": "Do replicas, beech mein network partition",
+    "nodes": [
+      "Replica A",
+      "Network link",
+      "Replica B"
+    ],
+    "steps": [
+      {
+        "title": "1. Normal case mein replicas baat karte hain",
+        "body": "A ka update network ke through B tak pahunch sakta hai; dono same latest value dekhte hain.",
+        "active": [
+          0,
+          1,
+          2
+        ],
+        "note": "A ↔ B · network healthy"
+      },
+      {
+        "title": "2. Network link toot gaya",
+        "body": "A aur B ek doosre ka update nahi dekh paa rahe. Partition tolerance ka scenario aa gaya.",
+        "active": [
+          0,
+          1,
+          2
+        ],
+        "note": "PARTITION · replicas out of sync ho sakti hain"
+      },
+      {
+        "title": "3. Request ka behavior choose karo",
+        "body": "System wait/reject karke stale answer rok sakta hai, ya reachable replica se reply de sakta hai aur baad mein reconcile kar sakta hai.",
+        "active": [
+          0,
+          2
+        ],
+        "note": "Consistency ↔ Availability"
+      }
+    ]
+  },
+  "reverse-proxy": {
+    "title": "Reverse proxy request ko backend tak pahunchata hai",
+    "nodes": [
+      "Browser",
+      "Reverse proxy",
+      "App server"
+    ],
+    "steps": [
+      {
+        "title": "1. Browser proxy se baat karta hai",
+        "body": "Public request reverse proxy par aati hai; client ko backend address ki zaroorat nahi hoti.",
+        "active": [
+          0,
+          1
+        ],
+        "note": "Client → reverse proxy"
+      },
+      {
+        "title": "2. Proxy app ko forward karta hai",
+        "body": "Proxy configured backend ko request bhejta hai aur yahan filtering ya TLS handling bhi ho sakti hai.",
+        "active": [
+          1,
+          2
+        ],
+        "note": "Proxy → application server"
+      },
+      {
+        "title": "3. Response proxy ke through lautata hai",
+        "body": "Application response reverse proxy se hote hue browser tak pahunchta hai.",
+        "active": [
+          0,
+          1,
+          2
+        ],
+        "note": "App → proxy → browser"
+      }
+    ]
+  },
+  "hld-approach": {
+    "title": "HLD interview ka six-step flow",
+    "nodes": [
+      "Clarify + estimate",
+      "Build the design",
+      "Review it"
+    ],
+    "steps": [
+      {
+        "title": "1. Requirements clarify karo",
+        "body": "Features, users aur priorities poochho. Abhi solution draw karne ki jaldi nahi.",
+        "active": [
+          0
+        ],
+        "note": "Scope clear"
+      },
+      {
+        "title": "2. Scale ka rough estimate",
+        "body": "Requests aur data ka andaaza lagao; assumptions ke saath units bolo.",
+        "active": [
+          0
+        ],
+        "note": "Numbers guide the design"
+      },
+      {
+        "title": "3. Minimum useful components",
+        "body": "Database, cache, queue ya CDN sirf clear reason par add karo.",
+        "active": [
+          1
+        ],
+        "note": "Har box ka ek purpose"
+      },
+      {
+        "title": "4. Request/data flow trace",
+        "body": "Ek real user action ko entry se response tak follow karo.",
+        "active": [
+          1
+        ],
+        "note": "Upload → storage → metadata"
+      },
+      {
+        "title": "5. Failure aur bottleneck",
+        "body": "Server, database aur worker fail ya slow hon toh behavior explain karo.",
+        "active": [
+          2
+        ],
+        "note": "Failure path bhi design hai"
+      },
+      {
+        "title": "6. Trade-off state karo",
+        "body": "Choice kyun fit hai aur uski cost kya hai, interview mein saaf bolo.",
+        "active": [
+          2
+        ],
+        "note": "Decision + reason + limitation"
+      }
+    ]
   }
 }

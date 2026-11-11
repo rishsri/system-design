@@ -51,6 +51,12 @@
         "title": "HLD aur LLD practice kahan se shuru karein?",
         "origin": "Supplementary explanation",
         "body": "Ek chhota feature lo—jaise photo upload. Pehle user ka flow aur requirements likho. HLD mein request path, metadata aur photo ke storage roles, expected load aur failure ke important cases draw karo. Phir LLD mein us flow ke modules, responsibilities aur method inputs/outputs decide karo.\n\nInterview mein har box ko technology se bharne ki jaldi nahi. Pehle batao box ki zaroorat kyun hai; phir estimate ya requirement aane par design ko agle step tak le jao."
+      },
+      {
+        "title": "HLD problem ko kaise approach karein? — 6 steps",
+        "body": "Interview mein design banana sirf boxes draw karna nahi. Pehle problem samjho, phir numbers aur flow ke basis par design ko dheere-dheere build karo.\n\n```mermaid\nflowchart TD\n  A[Clarify requirements] --> B[Estimate scale]\n  B --> C[Choose core components]\n  C --> D[Trace data flow]\n  D --> E[Check failures]\n  E --> F[Explain trade-offs]\n```\n\n**1. Requirements clear karo.** Photo-sharing app mein upload chahiye, viewing bhi? Kitne users? Speed, data freshness ya cost mein kya zyada important hai? Assume karne se pehle interviewer se poochho.\n\n**2. Rough scale estimate karo.** Users, requests per second aur stored data ka andaaza lagao. Exact future predict nahi karna; assumptions bolo aur samjho ki thousand users aur hundred million users ke designs kyun alag honge.\n\n**3. Core components choose karo.** Database, cache, queue ya CDN tab add karo jab requirement uski wajah de. Har box ke liye batao: yeh problem kaunsa solve kar raha hai?\n\n**4. Data flow trace karo.** Photo upload ka request load balancer se app server tak, image object storage mein, metadata database mein, aur optional thumbnail job queue/worker tak kaise jaata hai—step by step batao.\n\n**5. Bottlenecks aur failures dekho.** Server down ho, traffic spike aaye, database slow ho ya queue backlog badhe toh kya hoga? Sabse pehle likely bottleneck identify karo; phir uske liye mitigation aur uski limit batao.\n\n**6. Trade-offs explain karo.** Cache speed badha sakta hai par stale data ka risk laata hai. Har choice ke saath bolo kya improve hua, kya cost aayi, aur kis requirement ke liye yeh choice fit hai.\n\nIs order ko yaad rakho: **clarify → estimate → components → flow → failure → trade-off**. Sab advanced tools ek saath mat jodo; simple design se shuru karo aur reason aane par evolve karo.",
+        "origin": "Your content",
+        "animation": "hld-approach"
       }
     ],
     "takeaways": [
@@ -58,7 +64,8 @@
       "Latency ek request ka time hai; throughput requests per second.",
       "Vertical scaling ek machine badi karta hai; horizontal scaling machines add karta hai.",
       "Capacity estimates assumptions aur averages hote hain; peak, caching aur retention alag check karo.",
-      "Image bytes ke liye object storage/CDN consider karo; metadata aur checkout rules ka source alag ho sakta hai."
+      "Image bytes ke liye object storage/CDN consider karo; metadata aur checkout rules ka source alag ho sakta hai.",
+      "HLD flow: clarify, estimate, choose components, trace, check failure, explain trade-offs."
     ],
     "related": []
   },
@@ -119,6 +126,242 @@
       "Round robin sends requests to servers one after another in a repeating cycle, server one, then server two, then server three, then back to server one.",
       "Least connections sends each new request to whichever server currently has the fewest active connections.",
       "IP hashing generates a value based on the client's IP address and consistently sends that client to the same server every time."
+    ],
+    "related": []
+  },
+  {
+    "id": "core-caching-in-depth",
+    "slug": "core-caching-in-depth",
+    "title": "Caching, In Depth",
+    "topic": "Caching",
+    "category": "Core Systems",
+    "difficulty": "Beginner",
+    "type": "System design",
+    "tags": [
+      "Caching",
+      "Redis",
+      "TTL",
+      "Cache Invalidation"
+    ],
+    "description": "Repeat reads ko fast kaise banayein—and stale data ka risk kaise samjhein.",
+    "sections": [
+      {
+        "title": "Repeat request aayi, toh kya?",
+        "body": "Maan lo cricket score page ko ek hi match ke dauraan hazaaron log refresh karte hain. Score har second nahi badalta, lekin har refresh par wahi database read karna wasteful ho sakta hai.\n\n**Cache** frequently used data ki fast temporary copy rakhta hai. Pehli request database se data laa kar cache mein rakh sakti hai; agli request us copy ko read kar sakti hai. **Redis** shared server-side cache ka ek common example hai.\n\n**Cache hit**: key mil gayi. **Cache miss**: key nahi mili. Miss ka matlab record database mein missing nahi—app ko source of truth check karna hoga.",
+        "origin": "Your content"
+      },
+      {
+        "title": "Cache miss ke baad data ka flow",
+        "body": "Yeh common **cache-aside** pattern hai: app pehle Redis check karti hai. Miss par database padhti hai, result Redis mein TTL ke saath rakhti hai, phir user ko response deti hai.\n\n```mermaid\nflowchart LR\n  A[App] -->|GET photo:42| R[(Redis)]\n  R -->|Hit: cached photo| A\n  A -->|Miss: read photo| D[(Database)]\n  D -->|Photo| A\n  A -->|Set key with TTL| R\n```\n\nWalkthrough mein ek cache miss ko step-by-step dekh sakte ho.",
+        "origin": "Your content",
+        "animation": "cache-miss"
+      },
+      {
+        "title": "Freshness: TTL aur invalidation",
+        "body": "**TTL (time to live)** batata hai cached copy kitni der rahegi. TTL khatam hone par next request database se fresh copy laa sakti hai. Cricket score ko kuch seconds cache karna theek ho sakta hai; product price ke liye stale value zyada risky ho sakti hai.\n\nData update hote hi app cache key ko update ya delete bhi kar sakti hai. Isse purani copy jaldi hat jaati hai. TTL ek safety limit hai; woh har waqt fresh data ki guarantee nahi deta.",
+        "origin": "Your content"
+      },
+      {
+        "title": "Cache kahan ho sakta hai?",
+        "body": "- **Browser cache:** images jaise assets user ke device par.\n- **Server-side cache:** Redis jaise shared fast store mein.\n- **CDN cache:** content users ke paas maujood edge servers par.\n\nHar layer ka freshness rule alag ho sakta hai. Isliye price, stock ya permission jaise data ke liye cache se mili value ko final authority mat samjho.",
+        "origin": "Your content"
+      }
+    ],
+    "takeaways": [
+      "Cache fast temporary copy hai; database aksar original source of truth rehta hai.",
+      "Cache miss ke baad source check karo; miss ka matlab record missing nahi.",
+      "TTL aur invalidation stale copy ko limit karte hain, lekin har use case ka freshness rule alag hota hai."
+    ],
+    "related": []
+  },
+  {
+    "id": "core-content-delivery-networks",
+    "slug": "core-content-delivery-networks",
+    "title": "Content Delivery Networks (CDN)",
+    "topic": "CDN",
+    "category": "Core Systems",
+    "difficulty": "Beginner",
+    "type": "System design",
+    "tags": [
+      "CDN",
+      "Edge Servers",
+      "Caching",
+      "Latency"
+    ],
+    "description": "Images aur videos user ke paas wali copy se kaise serve hote hain.",
+    "sources": [
+      {
+        "url": "https://developers.cloudflare.com/reference-architecture/architectures/cdn/",
+        "label": "Cloudflare: CDN reference architecture"
+      }
+    ],
+    "sections": [
+      {
+        "title": "Data ko user ke paas rakho",
+        "body": "Agar har user ko image ek hi door ke server se download karni pade, toh network travel time badh sakta hai. **CDN (Content Delivery Network)** static content ki copies duniya bhar ke **edge servers** par rakhta hai.\n\nMaan lo tum Steam se bada game update download kar rahe ho. File tumhare paas ke CDN location se mil sakti hai, isliye origin server tak har baar lamba round trip nahi lagta.",
+        "origin": "Your content"
+      },
+      {
+        "title": "Cache hit aur cache miss ka flow",
+        "body": "Request pehle nearby edge par jaati hai. Copy wahan ho toh **cache hit** par edge seedha response deta hai. Copy na ho toh **cache miss** par edge origin se content leta hai, policy allow kare toh cache karta hai, aur response bhejta hai.\n\n```mermaid\nflowchart LR\n  B[Browser] --> E[Nearest CDN edge]\n  E -->|Cache hit| B\n  E -->|Cache miss| O[Origin server]\n  O -->|Content| E\n  E -->|Response| B\n```\n\nWalkthrough mein pehle miss aur phir edge se milne wali next request dekh sakte ho.",
+        "origin": "Your content",
+        "animation": "cdn-edge"
+      },
+      {
+        "title": "Kya cache karna safe hai?",
+        "body": "Images, CSS, videos aur game files jaise baar-baar use hone wale assets CDN ke liye achhe candidates hain. Cache rules decide karte hain ki copy kitni der valid hai aur update ke baad purge kab karna hai.\n\nUser-specific page, private data, ya live stock ko bina sahi cache key aur freshness rule ke public edge par cache mat karo. CDN origin ka load kam karta hai; woh har dynamic request ko automatically cache nahi karta.",
+        "origin": "Your content"
+      }
+    ],
+    "takeaways": [
+      "CDN user ke kareeb edge par content serve karke network distance kam kar sakta hai.",
+      "Hit par edge copy deta hai; miss par origin tak jaata hai.",
+      "Cache rules aur privacy decide karte hain kaunsa content edge par rakhna safe hai."
+    ],
+    "related": []
+  },
+  {
+    "id": "core-message-queues",
+    "slug": "core-message-queues",
+    "title": "Message Queues & Async Work",
+    "topic": "Message Queues",
+    "category": "Core Systems",
+    "difficulty": "Beginner",
+    "type": "System design",
+    "tags": [
+      "Queues",
+      "Asynchronous Processing",
+      "Workers",
+      "Retries"
+    ],
+    "description": "Slow background kaam ko user ke response se alag rakho—aur retries ko safe banao.",
+    "sections": [
+      {
+        "title": "User ko background kaam ka wait kyun karayein?",
+        "body": "Video upload ke baad user ko multiple resolutions aur thumbnail banne tak rukna zaroori nahi. API upload accept karke kaam ka message **queue** mein rakh sakti hai; worker usse baad mein process karta hai.\n\nQueue pending jobs ka buffer hai. Isse API aur worker alag pace par kaam kar sakte hain. RabbitMQ aur Kafka jaise tools is role ke liye use hote hain, lekin unke internals aur guarantees alag hain.",
+        "origin": "Your content"
+      },
+      {
+        "title": "Request aur worker ka flow",
+        "body": "API job ko queue tak pahunchati hai, phir user ko accepted response deti hai. Worker queue se job leta hai aur thumbnail, email ya doosra side effect karta hai.\n\n```mermaid\nflowchart LR\n  C[Client] --> A[API]\n  A -->|Job accepted| Q[(Durable queue)]\n  A -->|Response| C\n  Q --> W[Worker]\n  W --> S[Thumbnail or notification]\n```\n\nWalkthrough dikhata hai ki user response background processing ke finish hone ka wait nahi karta.",
+        "origin": "Your content",
+        "animation": "queue-processing"
+      },
+      {
+        "title": "Worker fail ho toh?",
+        "body": "Agar worker success se pehle crash kare, queue job ko dobara deliver kar sakti hai. Isliye ek hi job multiple baar chal sakta hai. **Idempotent** kaam ka matlab: same job repeat ho toh duplicate payment ya duplicate record na bane.\n\nQueue burst absorb karti hai, lekin extra worker capacity create nahi karti. Agar naye jobs processing se tez aa rahe hain, backlog badhega. Queue depth, sabse purane job ki age, retry count aur worker errors monitor karo.",
+        "origin": "Your content"
+      }
+    ],
+    "takeaways": [
+      "Queue slow background kaam ko request path se alag karti hai.",
+      "Crash ke baad retry duplicate delivery de sakti hai; worker ko idempotent banao.",
+      "Backlog badhna batata hai ki worker capacity ya incoming traffic ka balance check karna hai."
+    ],
+    "related": []
+  },
+  {
+    "id": "core-cap-theorem",
+    "slug": "core-cap-theorem",
+    "title": "The CAP Theorem",
+    "topic": "CAP Theorem",
+    "category": "Core Systems",
+    "difficulty": "Intermediate",
+    "type": "System design",
+    "tags": [
+      "CAP",
+      "Consistency",
+      "Availability",
+      "Partition Tolerance"
+    ],
+    "description": "Network partition ke waqt system ko latest data aur har request ka reply—dono mein se kya prioritize karna padta hai?",
+    "sources": [
+      {
+        "url": "https://doi.org/10.1145/564585.564601",
+        "label": "Gilbert and Lynch: CAP theorem paper"
+      },
+      {
+        "url": "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf",
+        "label": "Amazon Dynamo paper (2007)"
+      },
+      {
+        "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html",
+        "label": "AWS: DynamoDB read consistency"
+      }
+    ],
+    "sections": [
+      {
+        "title": "CAP ke teen words",
+        "body": "**Consistency:** CAP ke strong model mein, successful write ke baad shuru hui read ko us latest write ya usse naya result dikhna chahiye.\n\n**Availability:** request reachable, non-failed node tak aaye toh system valid response de. Response purana ho sakta hai.\n\n**Partition Tolerance:** network tootne par kuch replicas ek doosre se baat na kar paayein, tab bhi system ko apna behavior choose karna padta hai.",
+        "origin": "Your content"
+      },
+      {
+        "title": "Partition hui: latest value ya response?",
+        "body": "Maan lo account ki do replicas A aur B hain. A par balance update hua, lekin network partition ki wajah se B ko update pata nahi. B ke paas old balance hai.\n\nB old balance return kare toh request available rahi, par value stale ho sakti hai. B wait ya error de toh stale jawab se bach sakta hai, par us request ke liye availability chhodi. Yahi CAP ka practical trade-off hai.\n\n```mermaid\nflowchart TD\n  P[Network partition: replicas sync nahi kar pa rahe] --> D{Request policy}\n  D -->|Consistency| C[Wait ya reject; stale value mat do]\n  D -->|Availability| A[Reachable replica se reply; value stale ho sakti hai]\n```\n\nMotion flow mein replicas ka link tootne ke baad dono response choices dekho.",
+        "origin": "Your content",
+        "animation": "cap-partition"
+      },
+      {
+        "title": "CAP ko interview mein sahi kaise bolna hai?",
+        "body": "Shortcut **“teen mein se koi bhi do”** misleading ho sakta hai. CAP ka important result hai: **jab network partition ho**, tab system ko strong consistency aur availability ke beech choice karni padti hai. P ko disable nahi kar sakte; real networks kabhi kabhi split hote hain.\n\nSocial feed mein thoda delay acceptable ho sakta hai. Money transfer mein double spend se bachna zyada important hai, isliye account ki authoritative state verify na ho toh request wait ya fail karna behtar ho sakta hai. Har banking system ya social app ka rule ek jaisa nahi hota.",
+        "origin": "Supplementary explanation"
+      },
+      {
+        "title": "Amazon Dynamo aur DynamoDB ek cheez nahi hain",
+        "body": "Tumhare example ka idea **Amazon Dynamo** ke 2007 paper se match karta hai: paper shopping cart jaise Amazon services ke liye high availability aur failure ke dauraan consistency trade-offs discuss karta hai.\n\n**AWS DynamoDB** current managed service hai. AWS docs ke mutabik table aur local secondary index reads default mein eventually consistent hain, aur unke liye strongly consistent read bhi choose ki ja sakti hai. Global secondary indexes aur streams par strong read supported nahi. Isliye DynamoDB ko ek line mein “hamesha availability choose karta hai” kehna sahi nahi.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "CAP ka C strong latest-write consistency hai; A reachable node ka response dena.",
+      "Consistency aur availability ka trade-off partition ke waqt saamne aata hai.",
+      "Use case batao: stale feed acceptable ho sakti hai; balance update ke liye stale answer nahi."
+    ],
+    "related": []
+  },
+  {
+    "id": "core-proxies-forward-and-reverse",
+    "slug": "core-proxies-forward-and-reverse",
+    "title": "Proxies: Forward and Reverse",
+    "topic": "Proxies",
+    "category": "Core Systems",
+    "difficulty": "Beginner",
+    "type": "System design",
+    "tags": [
+      "Forward Proxy",
+      "Reverse Proxy",
+      "VPN",
+      "TLS"
+    ],
+    "description": "Proxy client ki taraf baitha hai ya server ki taraf? Request flow se pehchaano.",
+    "sources": [
+      {
+        "url": "https://developers.cloudflare.com/fundamentals/concepts/how-cloudflare-works/",
+        "label": "Cloudflare: reverse proxy and request flow"
+      }
+    ],
+    "sections": [
+      {
+        "title": "Forward proxy: client ki taraf",
+        "body": "Forward proxy client ke behalf par destination ko request bhejta hai. Maan lo office devices ek proxy se internet jaate hain: organization websites filter kar sakti hai, aur destination ko connection proxy ke network se aata hua dikh sakta hai.\n\nVPN ek familiar example hai: traffic VPN provider ke network se exit kar sakta hai. Ye anonymity guarantee nahi—accounts, cookies aur doosre signals phir bhi user ko identify kar sakte hain.\n\n```mermaid\nflowchart LR\n  U[User device] --> FWD[Forward proxy or VPN]\n  FWD --> W[Website]\n```",
+        "origin": "Your content"
+      },
+      {
+        "title": "Reverse proxy: server ki taraf",
+        "body": "Reverse proxy backend servers ke aage hota hai. Client proxy se baat karta hai; proxy request ko sahi application server tak forward karke response wapas laata hai.\n\nLoad balancer aksar reverse proxy ka role bhi karta hai, par dono terms bilkul interchangeable nahi. Reverse proxy TLS termination, request filtering, caching ya backend ko public se shield karne mein bhi help kar sakta hai.\n\n```mermaid\nflowchart LR\n  B[Browser] <-->|Request and response| R[Reverse proxy]\n  R <-->|Forward to app| A[Application servers]\n```\n\nWalkthrough mein request proxy se app tak aur response wapas aate dekho.",
+        "origin": "Your content",
+        "animation": "reverse-proxy"
+      },
+      {
+        "title": "Cloudflare example aur ek zaroori limit",
+        "body": "Cloudflare proxied traffic ko apne network ke through origin server tak forward kar sakta hai, edge par cache ya security checks laga sakta hai, aur TLS connections handle kar sakta hai.\n\nOrigin IP tabhi effectively hidden rehta hai jab clients us server ko proxy bypass karke directly reach na kar sakein. Sirf reverse proxy lagana direct-origin access ko khud se band nahi karta.",
+        "origin": "Supplementary explanation"
+      }
+    ],
+    "takeaways": [
+      "Forward proxy client ke behalf par request karta hai.",
+      "Reverse proxy server ke aage hota hai aur clients se backend tak request forward karta hai.",
+      "TLS, caching aur origin protection proxy configuration par depend karte hain."
     ],
     "related": []
   },

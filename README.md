@@ -6,7 +6,7 @@ The interface follows the supplied drawing: a simple system list, then a detail 
 
 ## Adding content
 
-URL-shortener content lives in `src/data/questions.json`; Core Systems content lives in `src/data/core-systems.json`. `src/content.ts` combines both libraries. Each entry has an ID, slug, title, topic, type, description, sections, takeaways and related question IDs. Entries with `type: "System design"` appear in the list. Their `related` IDs become interview questions on the detail page. Interview entries also have their own `/question/:slug` URLs. Sections use Markdown, including fenced code and Mermaid blocks. Set section `animation` to `redirect`, `ranges`, `deletion`, `search`, `indexing`, `replicas` or `dictionary` to attach the matching walkthrough.
+URL-shortener content lives in `src/data/questions.json`; Core Systems content lives in `src/data/core-systems.json`. `src/content.ts` combines both libraries. Each entry has an ID, slug, title, topic, type, description, sections, takeaways and related question IDs. Entries with `type: "System design"` appear in the list. Their `related` IDs become interview questions on the detail page. Interview entries also have their own `/question/:slug` URLs. Sections use Markdown, including fenced code and Mermaid blocks. Set section `animation` to `redirect`, `ranges`, `deletion`, `search`, `indexing`, `replicas` or `dictionary` to attach a matching JSON walkthrough.
 
 Animation text, nodes and steps live in `src/data/walkthroughs.json`. Framer Motion animates the current nodes and step explanations. Users can play, pause or manually navigate. Reduced-motion preferences are respected. These are educational walkthroughs, not live infrastructure.
 
@@ -20,9 +20,9 @@ For deployment, serve `dist` with SPA fallback to `index.html`. Mermaid is loade
 
 Agents should start with [AGENTS.md](AGENTS.md), then read [the system design writing guide](docs/SYSTEM_DESIGN_WRITING_GUIDE.md) before changing learning content. The guide defines beginner Hinglish voice, realistic interview-answer progression, source attribution, architecture diagrams, Framer Motion walkthroughs, and JSON authoring.
 
-## Core Systems: Elasticsearch
+## Core Systems lesson library
 
-The library has separate System Design / Core Systems navigation, with the existing searchable reading layout. Core Systems begins with `/question/core-system-design-foundations` (HLD, LLD and a worked capacity estimate), then `/question/core-load-balancers-in-depth` (the supplied explanation and code kept verbatim), followed by `/question/core-elasticsearch`, which starts with 8 short fundamentals sections. The 34 detailed topics, 7 browser simulations and advanced walkthroughs are in optional, individually expandable deep dives; 26 interview answers remain expandable below. The original URL-shortener URLs remain unchanged.
+The library has separate System Design / Core Systems navigation, with the existing searchable reading layout. Core Systems includes Foundations (HLD/LLD/capacity estimation), Load Balancers, Caching, CDN, Message Queues, CAP Theorem, Proxies and Elasticsearch lessons. Elasticsearch begins with a short Hinglish introduction, then offers optional deep dives and interview practice. The original URL-shortener URLs remain unchanged.
 
 - `src/data/core-systems.json`: chapter, interview questions, source metadata, revision notes, and section-level origins.
 - `src/data/search-labs.json`: matching example documents, presets, vocabulary, and lab titles.
